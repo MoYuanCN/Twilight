@@ -11,32 +11,31 @@ class UsersDatabaseModel(AsyncAttrs, DeclarativeBase):
     pass
 
 class Role(Enum):
-    NORMAL = 1 # 普通注册用户
-    ADMIN = 0 # 管理员
-    WHITE_LIST = 2 # 白名单用户
-    UNRECOGNIZED = -1 # 未注册用户
+    NORMAL = 1  # 普通注册用户
+    ADMIN = 0  # 管理员
+    WHITE_LIST = 2  # 白名单用户
+    UNRECOGNIZED = -1  # 未注册用户
     
 class UserModel(UsersDatabaseModel):
     __tablename__ = 'users'
-    uid: Mapped[int] = mapped_column(primary_key=True , index=True) # 用户UID
-    telegram_id: Mapped[int] = mapped_column(index=True , nullable=True) # 用户的Telegram ID
-    username: Mapped[str] = mapped_column(index=True , nullable=False) # 用户的Emby用户名
-    role: Mapped[int] = mapped_column(default=Role.UNRECOGNIZED.value, nullable=False) # 用户的角色
-    score: Mapped[int] = mapped_column(default=0, nullable=False) # 用户的积分
-    active_status: Mapped[bool] = mapped_column(default=True, nullable=False) # 用户是否启用
-    created_at: Mapped[int] = mapped_column(default=None, nullable=False) # 用户创建时间 使用时间戳
-    expired_at: Mapped[int] = mapped_column(default=None, nullable=False) # 用户到期时间 使用时间戳 如果为-1则永不过期
-    embyid: Mapped[str] = mapped_column(index= True, default='', nullable=False) # 用户的Emby账户
-    password: Mapped[str] = mapped_column(default='', nullable=False) # 用户的Emby密码hash
-    NSFW: Mapped[bool] = mapped_column(default=False, nullable=False) # 用户是否开启NSFW库
-    BGM_MODE: Mapped[bool] = mapped_column(default=False, nullable=False) # 用户是否开启BGM点格子模式
-    BGM_TOKEN: Mapped[str] = mapped_column(default='', nullable=False) # 用户的BGM Token
-    LAST_LOGIN_TIME: Mapped[int] = mapped_column(default=None, nullable=False) # 用户上次登录时间 使用时间戳
-    LAST_LOGIN_IP: Mapped[str] = mapped_column(default='', nullable=False) # 用户上次登录IP
-    LAST_LOGIN_UA: Mapped[str] = mapped_column(default='', nullable=False) # 用户上次登录UA
-    DEVICE_LIST: Mapped[str] = mapped_column(default='', nullable=False) # 用户设备列表
-    APIKEY: Mapped[str] = mapped_column(default='', nullable=False) # 用户API Key , 用于API访问认证
-    OTHER_INFO: Mapped[str] = mapped_column(default='', nullable=False) # 用户其他信息 , 使用json存储
+    UID: Mapped[int] = mapped_column(primary_key=True, index=True)  # 用户UID
+    TELEGRAM_ID: Mapped[int] = mapped_column(index=True, nullable=True)  # 用户的Telegram ID
+    USERNAME: Mapped[str] = mapped_column(index=True, nullable=False)  # 用户的Emby用户名
+    ROLE: Mapped[int] = mapped_column(default=Role.UNRECOGNIZED.value, nullable=False)  # 用户的角色
+    ACTIVE_STATUS: Mapped[bool] = mapped_column(default=True, nullable=False)  # 用户是否启用
+    CREATE_AT: Mapped[int] = mapped_column(default=None, nullable=False)  # 用户创建时间 使用时间戳
+    EXPIRED_AT: Mapped[int] = mapped_column(default=None, nullable=False)  # 用户到期时间 使用时间戳 如果为-1则永不过期
+    EMBYID: Mapped[str] = mapped_column(index=True, default='', nullable=False)  # 用户的Emby账户
+    PASSWORD: Mapped[str] = mapped_column(default='', nullable=False)  # 用户的Emby密码hash
+    NSFW: Mapped[bool] = mapped_column(default=False, nullable=False)  # 用户是否开启NSFW库
+    BGM_MODE: Mapped[bool] = mapped_column(default=False, nullable=False)  # 用户是否开启BGM点格子模式
+    BGM_TOKEN: Mapped[str] = mapped_column(default='', nullable=False)  # 用户的BGM Token
+    LAST_LOGIN_TIME: Mapped[int] = mapped_column(default=None, nullable=False)  # 用户上次登录时间 使用时间戳
+    LAST_LOGIN_IP: Mapped[str] = mapped_column(default='', nullable=False)  # 用户上次登录IP
+    LAST_LOGIN_UA: Mapped[str] = mapped_column(default='', nullable=False)  # 用户上次登录UA
+    DEVICE_LIST: Mapped[str] = mapped_column(default='', nullable=False)  # 用户设备列表
+    APIKEY: Mapped[str] = mapped_column(default='', nullable=False)  # 用户API Key , 用于API访问认证
+    OTHER_INFO: Mapped[str] = mapped_column(default='', nullable=False)  # 用户其他信息 , 使用json存储
     
 create_database("users", UsersDatabaseModel)
 DATABASE_URL = f'sqlite+aiosqlite:///{Config.DATABASES_DIR / "users.db"}'
@@ -55,7 +54,7 @@ class UserOperate:
             await session.commit()
     
     @staticmethod        
-    async def get_user_by_uid(self, uid: int) -> UserModel | None:
+    async def get_user_by_uid(uid: int) -> UserModel | None:
         """
         根据UID获取用户
         """
@@ -64,7 +63,7 @@ class UserOperate:
             return scalar.scalar_one_or_none()
     
     @staticmethod
-    async def get_user_by_telegram_id(self, telegram_id: int) -> UserModel | None:
+    async def get_user_by_telegram_id(telegram_id: int) -> UserModel | None:
         """
         根据Telegram ID获取用户
         """
@@ -73,7 +72,7 @@ class UserOperate:
             return scalar.scalar_one_or_none()
         
     @staticmethod
-    async def get_user_by_username(self, username: str) -> UserModel | None:
+    async def get_user_by_username(username: str) -> UserModel | None:
         """
         根据Emby用户名获取用户
         """
@@ -82,7 +81,7 @@ class UserOperate:
             return scalar.scalar_one_or_none()
     
     @staticmethod
-    async def get_user_by_embyid(self, embyid: str) -> UserModel | None:
+    async def get_user_by_embyid(embyid: str) -> UserModel | None:
         """
         根据Emby ID获取用户
         """
@@ -91,7 +90,7 @@ class UserOperate:
             return scalar.scalar_one_or_none()
     
     @staticmethod
-    async def update_user(self, user: UserModel):
+    async def update_user(user: UserModel):
         """
         更新用户信息
         """
@@ -101,7 +100,7 @@ class UserOperate:
             await session.commit()
     
     @staticmethod
-    async def delete_user(self, user: UserModel):
+    async def delete_user(user: UserModel):
         """
         删除用户
         """
@@ -111,7 +110,7 @@ class UserOperate:
             await session.commit()
             
     @staticmethod
-    async def unbind_telegram_user(self, user: UserModel):
+    async def unbind_telegram_user(user: UserModel):
         """
         将用户的Emby账号与Telegram解绑
         """
@@ -120,7 +119,7 @@ class UserOperate:
                 await session.execute(update(UserModel).where(UserModel.uid == user.uid).values(telegram_id=None))
         
     @staticmethod
-    async def renew_user_expire_time(self, user: UserModel, duration: int):
+    async def renew_user_expire_time(user: UserModel, duration: int):
         """
         续期指定时长给指定用户
         duration: 续期时长，单位为天
@@ -144,7 +143,7 @@ class UserOperate:
                 await session.execute(update(UserModel).where(UserModel.uid == user.uid).values(expired_at=new_expired_at))
                 
     @staticmethod
-    async def get_registered_users_count(self) -> int:
+    async def get_registered_users_count() -> int:
         """
         获取注册用户数量
         排除未注册用户 , 白名单用户 , 管理员
@@ -155,7 +154,7 @@ class UserOperate:
                 return scalar.scalar_one()
     
     @staticmethod
-    async def get_active_users_count(self) -> int:
+    async def get_active_users_count() -> int:
         """
         获取活跃用户数量
         排除未注册用户 , 白名单用户 , 管理员 , 过期用户
