@@ -65,6 +65,20 @@ from src.db.user import UserModel, UserOperate, Role
 from src.db.score import ScoreModel, ScoreOperate, RedPacketModel
 from src.db.regcode import RegCodeModel, RegCodeOperate, Type as RegCodeType
 from src.db.require import RequireModel, RequireOperate, Status as RequireStatus, Type as RequireType
+from src.db.bangumi import (
+    BangumiUserModel, BangumiUserOperate,
+    BangumiRequireModel, BangumiRequireOperate,
+    ReqStatus as BangumiReqStatus
+)
+from src.db.playback import (
+    PlaybackModel, PlaybackOperate,
+    DailyStatsModel, DailyStatsOperate,
+)
+from src.db.login_log import (
+    LoginLogModel, LoginLogOperate,
+    UserDeviceModel, UserDeviceOperate,
+    IPListOperate,
+)
 
 __all__ = [
     # 公共函数
@@ -88,4 +102,21 @@ __all__ = [
     'RequireOperate',
     'RequireStatus',
     'RequireType',
+    # Bangumi 相关
+    'BangumiUserModel',
+    'BangumiUserOperate',
+    'BangumiRequireModel',
+    'BangumiRequireOperate',
+    'BangumiReqStatus',
+    # 播放记录相关
+    'PlaybackModel',
+    'PlaybackOperate',
+    'DailyStatsModel',
+    'DailyStatsOperate',
+    # 登录日志相关
+    'LoginLogModel',
+    'LoginLogOperate',
+    'UserDeviceModel',
+    'UserDeviceOperate',
+    'IPListOperate',
 ]

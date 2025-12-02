@@ -41,6 +41,7 @@ class UserModel(UsersDatabaseModel):
     DEVICE_LIST: Mapped[Optional[str]] = mapped_column(String, default='', nullable=True)
     APIKEY_STATUS: Mapped[Optional[bool]] = mapped_column(Boolean, default=False, nullable=True)
     APIKEY: Mapped[Optional[str]] = mapped_column(String, default='', nullable=True)
+    AUTO_RENEW: Mapped[Optional[bool]] = mapped_column(Boolean, default=False, nullable=True)  # 自动续期开关
     OTHER: Mapped[Optional[str]] = mapped_column(String, default='', nullable=True)
 
 
@@ -187,6 +188,127 @@ class UserOperate:
         async with UsersSessionFactory() as session:
             async with session.begin():
                 await session.execute(
-                    update(UserModel).where(UserModel.UID == usr.UID).values(APIKEY=new_apikey)
+                    update(UserModel).where(UserModel.UID == usr.UID).values(
+                        APIKEY=new_apikey,
+                        APIKEY_STATUS=True
+                    )
                 )
         return new_apikey
+
+    @staticmethod
+    async def get_user_by_apikey(apikey: str) -> Optional[UserModel]:
+        """根据 API Key 获取用户"""
+        async with UsersSessionFactory() as session:
+            scalar = await session.execute(
+                select(UserModel).filter_by(APIKEY=apikey, APIKEY_STATUS=True).limit(1)
+            )
+            return scalar.scalar_one_or_none()
+
+    @staticmethod
+    async def set_apikey_status(uid: int, enabled: bool) -> bool:
+        """设置 API Key 状态"""
+        async with UsersSessionFactory() as session:
+            async with session.begin():
+                await session.execute(
+                    update(UserModel).where(UserModel.UID == uid).values(APIKEY_STATUS=enabled)
+                )
+                return True
+
+    @staticmethod
+    async def update_login_info(uid: int, ip: str = '', ua: str = '') -> None:
+        """更新用户登录信息"""
+        async with UsersSessionFactory() as session:
+            async with session.begin():
+                await session.execute(
+                    update(UserModel).where(UserModel.UID == uid).values(
+                        LAST_LOGIN_TIME=int(time.time()),
+                        LAST_LOGIN_IP=ip,
+                        LAST_LOGIN_UA=ua
+                    )
+                )
+
+    @staticmethod
+    async def get_expired_users() -> list[UserModel]:
+        """
+        获取所有已过期但仍处于启用状态的用户
+        排除永不过期(-1)的用户
+        """
+        current_time = int(time.time())
+        async with UsersSessionFactory() as session:
+            result = await session.execute(
+                select(UserModel).where(
+                    UserModel.EXPIRED_AT != -1,  # 排除永不过期
+                    UserModel.EXPIRED_AT < current_time,  # 已过期
+                    UserModel.ACTIVE_STATUS == True,  # 仍然启用
+                    UserModel.EMBYID != '',  # 有 Emby 账户
+                    UserModel.EMBYID.isnot(None),
+                )
+            )
+            return list(result.scalars().all())
+
+    @staticmethod
+    async def get_expiring_users(days: int = 3) -> list[UserModel]:
+        """
+        获取即将过期的用户（用于提醒通知）
+        
+        :param days: 几天内过期
+        """
+        current_time = int(time.time())
+        expire_threshold = current_time + days * 86400
+        async with UsersSessionFactory() as session:
+            result = await session.execute(
+                select(UserModel).where(
+                    UserModel.EXPIRED_AT != -1,
+                    UserModel.EXPIRED_AT > current_time,  # 还未过期
+                    UserModel.EXPIRED_AT <= expire_threshold,  # 但即将过期
+                    UserModel.ACTIVE_STATUS == True,
+                )
+            )
+            return list(result.scalars().all())
+
+    @staticmethod
+    async def get_all_users(
+        include_inactive: bool = False,
+        role: Optional[int] = None,
+        limit: int = 100,
+        offset: int = 0
+    ) -> tuple[list[UserModel], int]:
+        """
+        分页获取用户列表
+        
+        :return: (用户列表, 总数)
+        """
+        async with UsersSessionFactory() as session:
+            # 构建查询条件
+            conditions = []
+            if not include_inactive:
+                conditions.append(UserModel.ACTIVE_STATUS == True)
+            if role is not None:
+                conditions.append(UserModel.ROLE == role)
+            
+            # 查询总数
+            count_query = select(func.count()).select_from(UserModel)
+            if conditions:
+                count_query = count_query.where(*conditions)
+            total_result = await session.execute(count_query)
+            total = total_result.scalar_one()
+            
+            # 查询用户
+            query = select(UserModel).order_by(UserModel.UID.desc()).limit(limit).offset(offset)
+            if conditions:
+                query = query.where(*conditions)
+            result = await session.execute(query)
+            
+            return list(result.scalars().all()), total
+
+    @staticmethod
+    async def batch_disable_users(uids: list[int]) -> int:
+        """批量禁用用户"""
+        if not uids:
+            return 0
+        async with UsersSessionFactory() as session:
+            async with session.begin():
+                result = await session.execute(
+                    update(UserModel).where(UserModel.UID.in_(uids)).values(ACTIVE_STATUS=False)
+                )
+                return result.rowcount
