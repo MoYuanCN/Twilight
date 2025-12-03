@@ -2,6 +2,7 @@
 媒体搜索服务
 
 统一的媒体搜索接口，支持 TMDB 和 Bangumi
+支持库存检查功能
 """
 import re
 import logging
@@ -11,6 +12,7 @@ from enum import Enum
 
 from src.services.tmdb import get_tmdb_client, TMDBClient, TMDBMedia, TMDBError
 from src.services.bangumi import get_bangumi_client, BangumiClient, BangumiSubject, BangumiError, SubjectType
+from src.services.emby import get_emby_client, EmbyItem, EmbyError
 from src.db.bangumi import BangumiRequireModel, BangumiRequireOperate, ReqStatus
 from src.db.user import UserOperate
 from src.core.utils import timestamp
@@ -260,15 +262,291 @@ class MediaService:
         return None
 
 
+@dataclass
+class InventoryCheckResult:
+    """库存检查结果"""
+    exists: bool
+    item: Optional[EmbyItem] = None
+    message: str = ''
+    seasons_available: List[int] = None  # 已有的季度列表
+    season_requested: Optional[int] = None  # 请求的季度
+    
+    def __post_init__(self):
+        if self.seasons_available is None:
+            self.seasons_available = []
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            'exists': self.exists,
+            'message': self.message,
+            'item': self.item.to_dict() if self.item else None,
+            'seasons_available': self.seasons_available,
+            'season_requested': self.season_requested,
+        }
+
+
+class InventoryService:
+    """库存检查服务"""
+    
+    @staticmethod
+    async def check_by_title(
+        title: str,
+        year: Optional[int] = None,
+        original_title: str = None,
+        media_type: str = None,
+        season: Optional[int] = None
+    ) -> InventoryCheckResult:
+        """
+        通过标题检查库存
+        
+        :param title: 标题
+        :param year: 年份
+        :param original_title: 原标题
+        :param media_type: 媒体类型 (movie/tv/anime)
+        :param season: 季度（仅对剧集有效）
+        """
+        try:
+            emby = get_emby_client()
+            
+            # 如果是电影，直接检查
+            if media_type == 'movie':
+                exists, item = await emby.check_media_exists(
+                    title=title,
+                    year=year,
+                    original_title=original_title,
+                    media_type='movie'
+                )
+                
+                if exists and item:
+                    return InventoryCheckResult(
+                        exists=True,
+                        item=item,
+                        message=f"库中已有：{item.name}" + (f" ({item.year})" if item.year else "")
+                    )
+                
+                return InventoryCheckResult(
+                    exists=False,
+                    message="库中暂无此电影"
+                )
+            
+            # 剧集类型，检查季度
+            exists, series, seasons = await emby.check_series_with_seasons(
+                title=title,
+                season=season,
+                year=year,
+                original_title=original_title
+            )
+            
+            if not series:
+                return InventoryCheckResult(
+                    exists=False,
+                    message="库中暂无此剧集",
+                    season_requested=season
+                )
+            
+            # 剧集存在，检查季度
+            if season is not None:
+                if season in seasons:
+                    return InventoryCheckResult(
+                        exists=True,
+                        item=series,
+                        message=f"库中已有：{series.name} 第 {season} 季",
+                        seasons_available=seasons,
+                        season_requested=season
+                    )
+                else:
+                    seasons_str = ', '.join(str(s) for s in seasons) if seasons else "无"
+                    return InventoryCheckResult(
+                        exists=False,
+                        item=series,
+                        message=f"库中有 {series.name}，但缺少第 {season} 季\n已有季度：{seasons_str}",
+                        seasons_available=seasons,
+                        season_requested=season
+                    )
+            else:
+                # 未指定季度，只检查剧集是否存在
+                seasons_str = ', '.join(str(s) for s in seasons) if seasons else "无"
+                return InventoryCheckResult(
+                    exists=True,
+                    item=series,
+                    message=f"库中已有：{series.name}\n已有季度：{seasons_str}",
+                    seasons_available=seasons
+                )
+            
+        except EmbyError as e:
+            logger.warning(f"库存检查失败: {e}")
+            return InventoryCheckResult(
+                exists=False,
+                message=f"库存检查失败: {e}"
+            )
+    
+    @staticmethod
+    async def check_by_tmdb_id(
+        tmdb_id: int,
+        media_type: str = 'movie',
+        season: Optional[int] = None
+    ) -> InventoryCheckResult:
+        """
+        通过 TMDB ID 检查库存
+        
+        :param tmdb_id: TMDB ID
+        :param media_type: 媒体类型
+        :param season: 季度（仅对剧集有效）
+        """
+        try:
+            emby = get_emby_client()
+            emby_type = 'Movie' if media_type == 'movie' else 'Series'
+            item = await emby.find_by_tmdb_id(tmdb_id, emby_type)
+            
+            if not item:
+                return InventoryCheckResult(
+                    exists=False,
+                    message="库中暂无此媒体",
+                    season_requested=season
+                )
+            
+            # 如果是电影
+            if media_type == 'movie':
+                return InventoryCheckResult(
+                    exists=True,
+                    item=item,
+                    message=f"库中已有：{item.name}" + (f" ({item.year})" if item.year else "")
+                )
+            
+            # 如果是剧集，获取季度信息
+            seasons = await emby.get_series_seasons(item.id)
+            season_numbers = []
+            
+            for s in seasons:
+                if s.index_number is not None:
+                    season_numbers.append(s.index_number)
+                elif s.name:
+                    import re
+                    match = re.search(r'(?:Season|第)\s*(\d+)', s.name, re.IGNORECASE)
+                    if match:
+                        season_numbers.append(int(match.group(1)))
+            
+            season_numbers.sort()
+            
+            if season is not None:
+                if season in season_numbers:
+                    return InventoryCheckResult(
+                        exists=True,
+                        item=item,
+                        message=f"库中已有：{item.name} 第 {season} 季",
+                        seasons_available=season_numbers,
+                        season_requested=season
+                    )
+                else:
+                    seasons_str = ', '.join(str(s) for s in season_numbers) if season_numbers else "无"
+                    return InventoryCheckResult(
+                        exists=False,
+                        item=item,
+                        message=f"库中有 {item.name}，但缺少第 {season} 季\n已有季度：{seasons_str}",
+                        seasons_available=season_numbers,
+                        season_requested=season
+                    )
+            else:
+                seasons_str = ', '.join(str(s) for s in season_numbers) if season_numbers else "无"
+                return InventoryCheckResult(
+                    exists=True,
+                    item=item,
+                    message=f"库中已有：{item.name}\n已有季度：{seasons_str}",
+                    seasons_available=season_numbers
+                )
+            
+        except EmbyError as e:
+            logger.warning(f"库存检查失败: {e}")
+            return InventoryCheckResult(
+                exists=False,
+                message=f"库存检查失败: {e}"
+            )
+    
+    @classmethod
+    async def check_media(
+        cls,
+        media_info: Dict[str, Any],
+        source: str,
+        season: Optional[int] = None
+    ) -> InventoryCheckResult:
+        """
+        根据媒体信息检查库存
+        
+        :param media_info: 媒体信息字典
+        :param source: 来源 (tmdb/bangumi)
+        :param season: 季度（仅对剧集有效）
+        """
+        title = media_info.get('title', '')
+        original_title = media_info.get('original_title', '')
+        year = None
+        release_date = media_info.get('release_date', '')
+        if release_date and len(release_date) >= 4:
+            try:
+                year = int(release_date[:4])
+            except ValueError:
+                pass
+        
+        media_type = media_info.get('media_type', '')
+        if media_type in ('movie', '电影'):
+            media_type = 'movie'
+        elif media_type in ('tv', '剧集', '动画', 'anime'):
+            media_type = 'tv'
+        
+        # 如果是 TMDB 来源且有 ID，优先通过 ID 查找
+        if source == 'tmdb':
+            tmdb_id = media_info.get('id')
+            if tmdb_id:
+                return await cls.check_by_tmdb_id(tmdb_id, media_type, season)
+        
+        # 通过标题搜索
+        return await cls.check_by_title(
+            title=title,
+            year=year,
+            original_title=original_title,
+            media_type=media_type,
+            season=season
+        )
+
+
 class MediaRequestService:
     """媒体求片服务"""
+    
+    @staticmethod
+    async def check_inventory(
+        source: str,
+        media_id: int,
+        media_info: Dict[str, Any] = None,
+        season: Optional[int] = None
+    ) -> InventoryCheckResult:
+        """
+        检查库存
+        
+        :param source: 来源 ('tmdb' 或 'bangumi')
+        :param media_id: 媒体 ID
+        :param media_info: 媒体详细信息
+        :param season: 季度（仅对剧集有效）
+        """
+        if not media_info:
+            # 获取媒体信息
+            result = await MediaService.get_by_source_id(source, media_id)
+            if result:
+                media_info = result.to_dict()
+            else:
+                return InventoryCheckResult(
+                    exists=False,
+                    message="无法获取媒体信息"
+                )
+        
+        return await InventoryService.check_media(media_info, source, season)
     
     @staticmethod
     async def create_request(
         telegram_id: int,
         source: str,
         media_id: int,
-        media_info: Dict[str, Any] = None
+        media_info: Dict[str, Any] = None,
+        skip_inventory_check: bool = False,
+        season: Optional[int] = None
     ) -> Tuple[bool, str, Optional[int]]:
         """
         创建求片请求
@@ -277,6 +555,8 @@ class MediaRequestService:
         :param source: 来源 ('tmdb' 或 'bangumi')
         :param media_id: 媒体 ID
         :param media_info: 媒体信息（可选，用于存储额外信息）
+        :param skip_inventory_check: 是否跳过库存检查
+        :param season: 季度（仅对剧集有效）
         :return: (成功, 消息, 请求ID)
         """
         import json
@@ -286,20 +566,52 @@ class MediaRequestService:
         if not user:
             return False, "用户不存在", None
         
+        # 生成唯一 ID（考虑季度）
+        unique_id = media_id
+        if season is not None:
+            # 使用 media_id * 1000 + season 作为唯一标识
+            unique_id = media_id * 1000 + season
+        
         # 检查是否已有相同请求
-        existing = await BangumiRequireOperate.is_bangumi_exist(media_id)
+        existing = await BangumiRequireOperate.is_bangumi_exist(unique_id)
         if existing:
-            return False, "该媒体已被请求过", existing.id
+            status = ReqStatus(existing.status)
+            status_msg = {
+                ReqStatus.UNHANDLED: "待处理",
+                ReqStatus.ACCEPTED: "已接受，正在处理中",
+                ReqStatus.REJECTED: "已被拒绝",
+                ReqStatus.COMPLETED: "已完成",
+            }.get(status, "未知状态")
+            season_str = f" 第 {season} 季" if season else ""
+            return False, f"该媒体{season_str}已被请求过（{status_msg}）", existing.id
+        
+        # 库存检查（除非明确跳过）
+        if not skip_inventory_check:
+            inventory_result = await MediaRequestService.check_inventory(source, media_id, media_info, season)
+            if inventory_result.exists:
+                item = inventory_result.item
+                msg = inventory_result.message
+                if not msg:
+                    msg = f"📦 库中已有：{item.name}" if item else "📦 库中已有此媒体"
+                msg = f"📦 {msg}\n无需再次请求，请在媒体库中搜索观看。"
+                return False, msg, None
+        
+        # 添加季度信息到 media_info
+        if media_info is None:
+            media_info = {}
+        if season is not None:
+            media_info['season'] = season
         
         # 创建请求
         other_info = json.dumps({
             'source': source,
             'media_info': media_info,
-        }, ensure_ascii=False) if media_info else json.dumps({'source': source})
+            'season': season,
+        }, ensure_ascii=False)
         
         request = BangumiRequireModel(
             telegram_id=telegram_id,
-            bangumi_id=media_id,
+            bangumi_id=unique_id,
             status=ReqStatus.UNHANDLED.value,
             timestamp=timestamp(),
             other_info=other_info,
@@ -307,7 +619,8 @@ class MediaRequestService:
         
         await BangumiRequireOperate.add_require(request)
         
-        return True, "求片请求已提交", request.id
+        season_str = f" 第 {season} 季" if season else ""
+        return True, f"✅ 求片请求{season_str}已提交，请等待管理员处理", request.id
     
     @staticmethod
     async def get_user_requests(telegram_id: int) -> List[Dict[str, Any]]:

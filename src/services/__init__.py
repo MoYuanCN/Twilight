@@ -43,16 +43,25 @@ from src.services.tmdb import (
 from src.services.bangumi import (
     BangumiClient,
     BangumiSubject,
+    BangumiEpisode,
     BangumiError,
     SubjectType,
+    EpStatus,
     get_bangumi_client,
     close_bangumi_client,
+)
+from src.services.bangumi_sync import (
+    BangumiSyncService,
+    SyncRequest,
+    SyncResult,
 )
 from src.services.media_service import (
     MediaService,
     MediaRequestService,
     MediaSource,
     MediaSearchResult,
+    InventoryService,
+    InventoryCheckResult,
 )
 from src.services.stats_service import (
     StatsService,
@@ -119,15 +128,24 @@ __all__ = [
     # Bangumi
     'BangumiClient',
     'BangumiSubject',
+    'BangumiEpisode',
     'BangumiError',
     'SubjectType',
+    'EpStatus',
     'get_bangumi_client',
     'close_bangumi_client',
+    # Bangumi 同步服务
+    'BangumiSyncService',
+    'SyncRequest',
+    'SyncResult',
     # 媒体搜索
     'MediaService',
     'MediaRequestService',
     'MediaSource',
     'MediaSearchResult',
+    # 库存检查
+    'InventoryService',
+    'InventoryCheckResult',
     # 统计服务
     'StatsService',
     # Webhook 服务

@@ -95,7 +95,14 @@ class RegCodeOperate:
         """根据类型获取所有注册码"""
         async with RegCodeSessionFactory() as session:
             result = await session.execute(select(RegCodeModel).filter_by(TYPE=type_))
-            return list[RegCodeModel](result.scalars().all())
+            return list(result.scalars().all())
+    
+    @staticmethod
+    async def get_all_regcodes() -> List[RegCodeModel]:
+        """获取所有注册码"""
+        async with RegCodeSessionFactory() as session:
+            result = await session.execute(select(RegCodeModel))
+            return list(result.scalars().all())
 
     @staticmethod
     async def update_regcode_use_count(code: str, increment: int = 1) -> bool:
@@ -144,7 +151,7 @@ class RegCodeOperate:
             result = await session.execute(
                 select(RegCodeModel).filter(RegCodeModel.UID.contains(str(uid)))
             )
-            return list[RegCodeModel](result.scalars().all())
+            return list(result.scalars().all())
 
     @staticmethod
     async def get_active_regcodes_count() -> int:

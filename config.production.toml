@@ -234,3 +234,19 @@ expiry_remind_days = 3
 daily_ranking_time = ""
 # 新媒体入库通知
 new_media_notify = false
+
+# ===========================
+# Bangumi 同步配置
+# ===========================
+# 参考: https://github.com/SanaeMio/Bangumi-syncer
+[BangumiSync]
+# 是否启用 Bangumi 同步功能 (Emby/Jellyfin 看完自动点格子)
+enabled = false
+# 同步时是否自动添加到收藏（设为"在看"）
+auto_add_collection = true
+# 观看记录是否设为私有
+private_collection = true
+# 屏蔽关键词列表 (包含这些关键词的番剧不会同步)
+block_keywords = []
+# 最小播放进度（百分比）才算看完
+min_progress_percent = 80

@@ -250,6 +250,15 @@ class NotificationConfig(BaseConfig):
     NEW_MEDIA_NOTIFY: bool = False
 
 
+class BangumiSyncConfig(BaseConfig):
+    """Bangumi 同步配置"""
+    ENABLED: bool = True  # 是否启用 Bangumi 同步
+    AUTO_ADD_COLLECTION: bool = True  # 同步时是否自动添加到收藏（设为"在看"）
+    PRIVATE_COLLECTION: bool = False  # 观看记录是否设为私有
+    BLOCK_KEYWORDS: List[str] = []  # 屏蔽关键词列表
+    MIN_PROGRESS_PERCENT: int = 80  # 最小播放进度（百分比）才算看完
+
+
 # 自动加载配置
 Config.update_from_toml("Global")
 EmbyConfig.update_from_toml('Emby')
@@ -261,3 +270,4 @@ APIConfig.update_from_toml('API')
 SecurityConfig.update_from_toml('Security')
 SchedulerConfig.update_from_toml('Scheduler')
 NotificationConfig.update_from_toml('Notification')
+BangumiSyncConfig.update_from_toml('BangumiSync')

@@ -2,11 +2,12 @@
 媒体搜索 API
 
 提供 TMDB 和 Bangumi 统一搜索接口
+支持库存检查和求片功能
 """
 from flask import Blueprint, request, g
 
 from src.api.v1.auth import async_route, require_auth, api_response
-from src.services import MediaService, MediaRequestService, MediaSource
+from src.services import MediaService, MediaRequestService, MediaSource, InventoryService
 from src.db.bangumi import ReqStatus
 
 media_bp = Blueprint('media', __name__, url_prefix='/media')
@@ -205,6 +206,151 @@ async def get_media_detail():
         return api_response(False, f"获取失败: {e}", code=500)
 
 
+# ==================== 库存检查 ====================
+
+@media_bp.route('/inventory/check', methods=['POST'])
+@async_route
+async def check_inventory():
+    """
+    检查媒体库存（支持季度检查）
+    
+    Request:
+        {
+            "source": "tmdb",           // tmdb 或 bangumi
+            "media_id": 123,            // 媒体 ID
+            "media_type": "tv",         // 可选，tmdb 的类型
+            "season": 1                 // 可选，要检查的季度
+        }
+    
+    或者直接通过标题检查：
+        {
+            "title": "进击的巨人",
+            "year": 2013,               // 可选
+            "original_title": "進撃の巨人",  // 可选
+            "media_type": "tv",         // 可选
+            "season": 4                 // 可选，要检查的季度
+        }
+    
+    Response (库中已有该季度):
+        {
+            "success": true,
+            "data": {
+                "exists": true,
+                "message": "库中已有：进击的巨人 第 1 季",
+                "seasons_available": [1, 2, 3],
+                "season_requested": 1
+            }
+        }
+    
+    Response (库中有剧集但缺少该季度):
+        {
+            "success": true,
+            "data": {
+                "exists": false,
+                "message": "库中有 进击的巨人，但缺少第 4 季\\n已有季度：1, 2, 3",
+                "seasons_available": [1, 2, 3],
+                "season_requested": 4
+            }
+        }
+    """
+    data = request.get_json() or {}
+    
+    source = data.get('source')
+    media_id = data.get('media_id')
+    title = data.get('title')
+    season = data.get('season')
+    
+    # 转换 season 为整数
+    if season is not None:
+        try:
+            season = int(season)
+        except (ValueError, TypeError):
+            season = None
+    
+    if source and media_id:
+        # 通过来源和 ID 检查
+        media_type = data.get('media_type', 'movie')
+        
+        # 获取媒体信息
+        result = await MediaService.get_by_source_id(source, media_id, media_type)
+        if not result:
+            return api_response(False, "媒体不存在", code=404)
+        
+        media_info = {
+            'id': result.id,
+            'title': result.title,
+            'original_title': result.original_title,
+            'media_type': result.media_type,
+            'release_date': result.release_date,
+        }
+        
+        inventory_result = await InventoryService.check_media(media_info, source, season)
+        
+    elif title:
+        # 通过标题直接检查
+        year = data.get('year')
+        original_title = data.get('original_title')
+        media_type = data.get('media_type')
+        
+        inventory_result = await InventoryService.check_by_title(
+            title=title,
+            year=year,
+            original_title=original_title,
+            media_type=media_type,
+            season=season
+        )
+    
+    else:
+        return api_response(False, "缺少必要参数 (source+media_id 或 title)", code=400)
+    
+    return api_response(True, inventory_result.message, inventory_result.to_dict())
+
+
+@media_bp.route('/inventory/search', methods=['GET'])
+@async_route
+async def search_inventory():
+    """
+    搜索库存
+    
+    Query:
+        q: str - 搜索关键词
+        type: str - 类型过滤 (Movie/Series/Episode)
+        year: int - 年份过滤
+        limit: int - 返回数量
+    """
+    from src.services.emby import get_emby_client, EmbyError
+    
+    query = request.args.get('q', '').strip()
+    item_type = request.args.get('type')
+    year = request.args.get('year', type=int)
+    limit = request.args.get('limit', 20, type=int)
+    
+    if not query:
+        return api_response(False, "缺少搜索关键词", code=400)
+    
+    limit = min(max(limit, 1), 50)
+    
+    try:
+        emby = get_emby_client()
+        include_types = [item_type] if item_type else ['Movie', 'Series']
+        
+        items = await emby.search_media(
+            search_term=query,
+            include_types=include_types,
+            year=year,
+            limit=limit
+        )
+        
+        return api_response(True, f"找到 {len(items)} 个结果", {
+            'query': query,
+            'count': len(items),
+            'results': [item.to_dict() for item in items],
+        })
+        
+    except EmbyError as e:
+        return api_response(False, f"搜索失败: {e}", code=500)
+
+
 # ==================== 求片功能 ====================
 
 @media_bp.route('/request', methods=['POST'])
@@ -212,21 +358,41 @@ async def get_media_detail():
 @require_auth
 async def create_media_request():
     """
-    创建求片请求
+    创建求片请求（会自动检查库存，支持季度）
     
     Request:
         {
             "source": "tmdb",           // tmdb 或 bangumi
             "media_id": 123,            // 媒体 ID
-            "media_type": "movie",      // 可选，tmdb 的类型
-            "title": "电影名称",         // 可选，用于记录
-            "note": "备注信息"           // 可选
+            "media_type": "tv",         // 可选，tmdb 的类型
+            "season": 4,                // 可选，季度（剧集需要）
+            "title": "剧集名称",         // 可选，用于记录
+            "note": "备注信息",          // 可选
+            "skip_inventory_check": false  // 可选，是否跳过库存检查
         }
     
     或者直接搜索后选择：
         {
             "query": "进击的巨人",       // 搜索关键词
-            "index": 0                  // 选择搜索结果的索引
+            "index": 0,                 // 选择搜索结果的索引
+            "season": 4                 // 可选，季度
+        }
+    
+    Response (库中已有该季度):
+        {
+            "success": false,
+            "message": "📦 库中已有：进击的巨人 第 4 季\\n无需再次请求，请在媒体库中搜索观看。"
+        }
+    
+    Response (库中有剧集但缺少该季度，可以请求):
+        {
+            "success": true,
+            "message": "✅ 求片请求 第 4 季已提交，请等待管理员处理",
+            "data": {
+                "request_id": 123,
+                "season": 4,
+                "inventory_checked": true
+            }
         }
     """
     data = request.get_json() or {}
@@ -234,6 +400,15 @@ async def create_media_request():
     # 方式1: 直接指定
     source = data.get('source')
     media_id = data.get('media_id')
+    skip_inventory_check = data.get('skip_inventory_check', False)
+    season = data.get('season')
+    
+    # 转换 season 为整数
+    if season is not None:
+        try:
+            season = int(season)
+        except (ValueError, TypeError):
+            season = None
     
     # 方式2: 搜索后选择
     query = data.get('query')
@@ -249,10 +424,12 @@ async def create_media_request():
         result = await MediaService.get_by_source_id(source, media_id, media_type)
         if result:
             media_info = {
+                'id': result.id,
                 'title': result.title,
                 'original_title': result.original_title,
                 'media_type': result.media_type,
                 'year': result.year,
+                'release_date': result.release_date,
                 'source_url': result.source_url,
             }
         
@@ -274,10 +451,12 @@ async def create_media_request():
             source = selected.source
             media_id = selected.id
             media_info = {
+                'id': selected.id,
                 'title': selected.title,
                 'original_title': selected.original_title,
                 'media_type': selected.media_type,
                 'year': selected.year,
+                'release_date': selected.release_date,
                 'source_url': selected.source_url,
             }
         except Exception as e:
@@ -286,12 +465,14 @@ async def create_media_request():
     else:
         return api_response(False, "缺少必要参数", code=400)
     
-    # 创建请求
+    # 创建请求（包含库存检查）
     success, message, request_id = await MediaRequestService.create_request(
         g.current_user.TELEGRAM_ID,
         source,
         media_id,
-        media_info
+        media_info,
+        skip_inventory_check=skip_inventory_check,
+        season=season
     )
     
     if success:
@@ -299,7 +480,9 @@ async def create_media_request():
             'request_id': request_id,
             'source': source,
             'media_id': media_id,
+            'season': season,
             'media_info': media_info,
+            'inventory_checked': not skip_inventory_check,
         })
     return api_response(False, message, code=400)
 
