@@ -94,6 +94,11 @@ class UserOperate:
         async with UsersSessionFactory() as session:
             scalar = await session.execute(select(UserModel).filter_by(EMBYID=embyid).limit(1))
             return scalar.scalar_one_or_none()
+    
+    @staticmethod
+    async def get_user_by_emby_username(username: str) -> Optional[UserModel]:
+        """根据 Emby/Jellyfin 用户名获取用户（与 get_user_by_username 相同）"""
+        return await UserOperate.get_user_by_username(username)
 
     @staticmethod
     async def update_user(user: UserModel) -> None:

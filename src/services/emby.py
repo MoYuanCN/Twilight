@@ -7,7 +7,7 @@ Emby/Jellyfin API 客户端
 - https://github.com/jellyfin/jellyfin-apiclient-python
 """
 import logging
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Tuple
 from dataclasses import dataclass, field
 from enum import Enum
 
@@ -125,6 +125,15 @@ class EmbyItem:
     overview: str = ''
     year: Optional[int] = None
     parent_id: str = ''
+    series_name: str = ''
+    season_name: str = ''
+    index_number: Optional[int] = None
+    parent_index_number: Optional[int] = None
+    premiere_date: str = ''
+    original_title: str = ''
+    sort_name: str = ''
+    external_ids: Dict[str, str] = field(default_factory=dict)
+    provider_ids: Dict[str, str] = field(default_factory=dict)
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'EmbyItem':
@@ -135,7 +144,45 @@ class EmbyItem:
             overview=data.get('Overview', ''),
             year=data.get('ProductionYear'),
             parent_id=data.get('ParentId', ''),
+            series_name=data.get('SeriesName', ''),
+            season_name=data.get('SeasonName', ''),
+            index_number=data.get('IndexNumber'),
+            parent_index_number=data.get('ParentIndexNumber'),
+            premiere_date=data.get('PremiereDate', ''),
+            original_title=data.get('OriginalTitle', ''),
+            sort_name=data.get('SortName', ''),
+            external_ids=data.get('ExternalIds', {}),
+            provider_ids=data.get('ProviderIds', {}),
         )
+    
+    @property
+    def tmdb_id(self) -> Optional[str]:
+        """获取 TMDB ID"""
+        return self.provider_ids.get('Tmdb')
+    
+    @property
+    def imdb_id(self) -> Optional[str]:
+        """获取 IMDB ID"""
+        return self.provider_ids.get('Imdb')
+    
+    @property
+    def tvdb_id(self) -> Optional[str]:
+        """获取 TVDB ID"""
+        return self.provider_ids.get('Tvdb')
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            'id': self.id,
+            'name': self.name,
+            'type': self.type,
+            'overview': self.overview,
+            'year': self.year,
+            'series_name': self.series_name,
+            'original_title': self.original_title,
+            'premiere_date': self.premiere_date,
+            'tmdb_id': self.tmdb_id,
+            'imdb_id': self.imdb_id,
+        }
 
 
 # ==================== 客户端 ====================
@@ -470,6 +517,231 @@ class EmbyClient:
         )
         items = data.get('Items', []) if data else []
         return [EmbyItem.from_dict(item) for item in items]
+    
+    async def search_media(
+        self,
+        search_term: str,
+        include_types: List[str] = None,
+        year: Optional[int] = None,
+        limit: int = 50
+    ) -> List[EmbyItem]:
+        """
+        搜索媒体库
+        
+        :param search_term: 搜索关键词
+        :param include_types: 媒体类型过滤 (Movie, Series, Episode, Season, etc.)
+        :param year: 年份过滤
+        :param limit: 返回数量
+        """
+        params = {
+            'SearchTerm': search_term,
+            'Limit': limit,
+            'Recursive': 'true',
+            'Fields': 'ProviderIds,Overview,OriginalTitle,PremiereDate,ProductionYear',
+        }
+        
+        if include_types:
+            params['IncludeItemTypes'] = ','.join(include_types)
+        if year:
+            params['Years'] = str(year)
+        
+        data = await self._request('GET', '/Items', params=params)
+        items = data.get('Items', []) if data else []
+        return [EmbyItem.from_dict(item) for item in items]
+    
+    async def find_by_tmdb_id(self, tmdb_id: int, media_type: str = 'Movie') -> Optional[EmbyItem]:
+        """
+        根据 TMDB ID 查找媒体
+        
+        :param tmdb_id: TMDB ID
+        :param media_type: 媒体类型 (Movie/Series)
+        """
+        # 通过 AnyProviderIdEquals 参数搜索
+        params = {
+            'AnyProviderIdEquals': f'Tmdb.{tmdb_id}',
+            'IncludeItemTypes': media_type,
+            'Recursive': 'true',
+            'Fields': 'ProviderIds,Overview,OriginalTitle,PremiereDate,ProductionYear',
+            'Limit': 1,
+        }
+        
+        data = await self._request('GET', '/Items', params=params)
+        items = data.get('Items', []) if data else []
+        
+        if items:
+            return EmbyItem.from_dict(items[0])
+        
+        # 备用方案：搜索所有项目检查 ProviderIds
+        # 这是因为某些 Emby 版本可能不支持 AnyProviderIdEquals
+        return None
+    
+    async def find_by_imdb_id(self, imdb_id: str) -> Optional[EmbyItem]:
+        """根据 IMDB ID 查找媒体"""
+        params = {
+            'AnyProviderIdEquals': f'Imdb.{imdb_id}',
+            'Recursive': 'true',
+            'Fields': 'ProviderIds,Overview,OriginalTitle,PremiereDate,ProductionYear',
+            'Limit': 1,
+        }
+        
+        data = await self._request('GET', '/Items', params=params)
+        items = data.get('Items', []) if data else []
+        
+        if items:
+            return EmbyItem.from_dict(items[0])
+        return None
+    
+    async def get_series_seasons(self, series_id: str) -> List[EmbyItem]:
+        """
+        获取剧集的所有季度
+        
+        :param series_id: 剧集 ID
+        :return: 季度列表
+        """
+        params = {
+            'ParentId': series_id,
+            'IncludeItemTypes': 'Season',
+            'Recursive': 'false',
+            'Fields': 'ProviderIds,Overview,PremiereDate,ProductionYear',
+            'SortBy': 'SortName',
+            'SortOrder': 'Ascending',
+        }
+        
+        data = await self._request('GET', '/Items', params=params)
+        items = data.get('Items', []) if data else []
+        return [EmbyItem.from_dict(item) for item in items]
+    
+    async def get_season_episodes(self, season_id: str) -> List[EmbyItem]:
+        """
+        获取某一季的所有剧集
+        
+        :param season_id: 季度 ID
+        :return: 剧集列表
+        """
+        params = {
+            'ParentId': season_id,
+            'IncludeItemTypes': 'Episode',
+            'Recursive': 'false',
+            'Fields': 'Overview,PremiereDate',
+            'SortBy': 'IndexNumber',
+            'SortOrder': 'Ascending',
+        }
+        
+        data = await self._request('GET', '/Items', params=params)
+        items = data.get('Items', []) if data else []
+        return [EmbyItem.from_dict(item) for item in items]
+    
+    async def check_media_exists(
+        self,
+        title: str,
+        year: Optional[int] = None,
+        original_title: str = None,
+        tmdb_id: int = None,
+        media_type: str = None
+    ) -> Tuple[bool, Optional[EmbyItem]]:
+        """
+        检查媒体是否存在于库中
+        
+        :param title: 媒体标题
+        :param year: 年份
+        :param original_title: 原标题
+        :param tmdb_id: TMDB ID
+        :param media_type: 媒体类型 (movie/tv)
+        :return: (是否存在, 媒体项)
+        """
+        # 1. 如果有 TMDB ID，优先通过 ID 查找
+        if tmdb_id:
+            emby_type = 'Movie' if media_type == 'movie' else 'Series'
+            item = await self.find_by_tmdb_id(tmdb_id, emby_type)
+            if item:
+                return True, item
+        
+        # 2. 通过标题搜索
+        search_titles = [title]
+        if original_title and original_title != title:
+            search_titles.append(original_title)
+        
+        include_types = None
+        if media_type:
+            include_types = ['Movie'] if media_type == 'movie' else ['Series']
+        
+        for search_title in search_titles:
+            items = await self.search_media(
+                search_title,
+                include_types=include_types,
+                year=year,
+                limit=10
+            )
+            
+            for item in items:
+                # 精确匹配标题
+                item_names = [item.name.lower(), item.original_title.lower(), item.sort_name.lower()]
+                if search_title.lower() in item_names:
+                    # 如果有年份，也检查年份
+                    if year and item.year:
+                        if abs(item.year - year) <= 1:  # 允许1年误差
+                            return True, item
+                    else:
+                        return True, item
+        
+        return False, None
+    
+    async def check_series_with_seasons(
+        self,
+        title: str,
+        season: Optional[int] = None,
+        year: Optional[int] = None,
+        original_title: str = None,
+        tmdb_id: int = None
+    ) -> Tuple[bool, Optional[EmbyItem], List[int]]:
+        """
+        检查剧集是否存在，并返回已有的季度列表
+        
+        :param title: 剧集标题
+        :param season: 要检查的季度（None=检查所有）
+        :param year: 年份
+        :param original_title: 原标题
+        :param tmdb_id: TMDB ID
+        :return: (剧集是否存在, 剧集项, 已有季度列表)
+        """
+        # 先检查剧集是否存在
+        exists, series = await self.check_media_exists(
+            title=title,
+            year=year,
+            original_title=original_title,
+            tmdb_id=tmdb_id,
+            media_type='tv'
+        )
+        
+        if not exists or not series:
+            return False, None, []
+        
+        # 获取已有的季度
+        seasons = await self.get_series_seasons(series.id)
+        season_numbers = []
+        
+        for s in seasons:
+            # 季度编号通常在 IndexNumber 或者名称中
+            if s.index_number is not None:
+                season_numbers.append(s.index_number)
+            elif s.name:
+                # 尝试从名称解析，如 "Season 1" 或 "第1季"
+                import re
+                match = re.search(r'(?:Season|第)\s*(\d+)', s.name, re.IGNORECASE)
+                if match:
+                    season_numbers.append(int(match.group(1)))
+        
+        season_numbers.sort()
+        
+        # 如果指定了季度，检查该季度是否存在
+        if season is not None:
+            if season in season_numbers:
+                return True, series, season_numbers
+            else:
+                # 剧集存在但指定的季度不存在
+                return False, series, season_numbers
+        
+        return True, series, season_numbers
 
     # ==================== 会话 API ====================
     

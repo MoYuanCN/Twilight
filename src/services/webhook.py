@@ -292,6 +292,14 @@ class WebhookService:
                 position_ticks=payload.position_ticks,
                 is_paused=payload.is_paused,
             )
+        
+        # Bangumi 同步 (播放停止时)
+        if payload.event == 'playback.stop' and payload.item_type and payload.item_type.lower() == 'episode':
+            try:
+                from src.services.bangumi_sync import bangumi_webhook_handler
+                await bangumi_webhook_handler(payload)
+            except Exception as e:
+                logger.warning(f"Bangumi 同步处理失败: {e}")
 
 
 # 外部 Webhook 推送服务

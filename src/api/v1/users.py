@@ -203,6 +203,55 @@ async def reset_my_password():
     return api_response(False, message)
 
 
+@users_bp.route('/me/nsfw', methods=['GET'])
+@async_route
+@require_auth
+async def get_nsfw_status():
+    """
+    获取 NSFW 权限状态
+    
+    Response:
+        {
+            "success": true,
+            "data": {
+                "enabled": true,           // 用户是否已开启 NSFW
+                "has_permission": true,    // 用户在 Emby 中是否有 NSFW 库访问权限
+                "nsfw_library_id": "xxx",  // NSFW 库 ID
+                "can_toggle": true         // 用户是否可以切换（有权限才能切换）
+            }
+        }
+    """
+    from src.services import EmbyService
+    from src.config import EmbyConfig
+    
+    user = g.current_user
+    nsfw_library_id = EmbyConfig.EMBY_NSFW
+    
+    # 检查是否配置了 NSFW 库
+    if not nsfw_library_id:
+        return api_response(True, "NSFW 库未配置", {
+            'enabled': False,
+            'has_permission': False,
+            'nsfw_library_id': None,
+            'can_toggle': False,
+            'message': '系统未配置 NSFW 媒体库'
+        })
+    
+    # 获取用户在 Emby 中的媒体库访问权限
+    library_ids, enable_all = await EmbyService.get_user_library_access(user)
+    
+    # 判断用户是否有 NSFW 库访问权限
+    has_permission = enable_all or (nsfw_library_id in library_ids)
+    
+    return api_response(True, "获取成功", {
+        'enabled': user.NSFW,
+        'has_permission': has_permission,
+        'nsfw_library_id': nsfw_library_id,
+        'can_toggle': has_permission,
+        'message': '有访问权限，可自行开关' if has_permission else '您没有 NSFW 库的访问权限，请联系管理员'
+    })
+
+
 @users_bp.route('/me/nsfw', methods=['PUT'])
 @async_route
 @require_auth
@@ -210,15 +259,38 @@ async def toggle_my_nsfw():
     """
     切换 NSFW 库访问权限
     
+    只有在 Emby 中有 NSFW 库访问权限的用户才能切换。
+    此设置控制用户是否"显示" NSFW 内容，而非权限本身。
+    
     Request:
         {
             "enable": true
         }
     """
+    from src.services import EmbyService
+    from src.config import EmbyConfig
+    
     data = request.get_json() or {}
     enable = data.get('enable', False)
+    user = g.current_user
     
-    success, message = await UserService.toggle_nsfw(g.current_user, enable)
+    nsfw_library_id = EmbyConfig.EMBY_NSFW
+    
+    # 检查是否配置了 NSFW 库
+    if not nsfw_library_id:
+        return api_response(False, "系统未配置 NSFW 媒体库", code=400)
+    
+    # 获取用户在 Emby 中的媒体库访问权限
+    library_ids, enable_all = await EmbyService.get_user_library_access(user)
+    
+    # 判断用户是否有 NSFW 库访问权限
+    has_permission = enable_all or (nsfw_library_id in library_ids)
+    
+    if not has_permission:
+        return api_response(False, "您没有 NSFW 库的访问权限，无法切换此选项", code=403)
+    
+    # 有权限，执行切换
+    success, message = await UserService.toggle_nsfw(user, enable)
     return api_response(success, message)
 
 
@@ -339,6 +411,160 @@ async def get_my_login_history():
     })
 
 
+# ==================== Telegram 绑定管理 ====================
+
+@users_bp.route('/me/telegram', methods=['GET'])
+@async_route
+@require_auth
+async def get_telegram_status():
+    """
+    获取 Telegram 绑定状态
+    
+    Response:
+        {
+            "success": true,
+            "data": {
+                "bound": true,
+                "telegram_id": 123456789,  // 部分隐藏
+                "force_bind": true,        // 系统是否强制绑定 TG
+                "can_unbind": false,       // 是否可以解绑（强制绑定时不可解绑）
+                "can_change": true         // 是否可以换绑
+            }
+        }
+    """
+    from src.config import Config
+    
+    user = g.current_user
+    force_bind = Config.FORCE_BIND_TELEGRAM
+    
+    # 隐藏部分 Telegram ID
+    masked_id = None
+    if user.TELEGRAM_ID:
+        id_str = str(user.TELEGRAM_ID)
+        if len(id_str) > 4:
+            masked_id = id_str[:3] + '****' + id_str[-2:]
+        else:
+            masked_id = '****'
+    
+    return api_response(True, "获取成功", {
+        'bound': bool(user.TELEGRAM_ID),
+        'telegram_id': masked_id,
+        'telegram_id_full': user.TELEGRAM_ID,  # 完整 ID（用于前端判断）
+        'force_bind': force_bind,
+        'can_unbind': not force_bind and bool(user.TELEGRAM_ID),
+        'can_change': bool(user.TELEGRAM_ID),  # 已绑定才能换绑
+    })
+
+
+@users_bp.route('/me/telegram/bind', methods=['POST'])
+@async_route
+@require_auth
+async def bind_my_telegram():
+    """
+    绑定 Telegram 账号
+    
+    Request:
+        {
+            "telegram_id": 123456789
+        }
+    """
+    user = g.current_user
+    data = request.get_json() or {}
+    telegram_id = data.get('telegram_id')
+    
+    if not telegram_id:
+        return api_response(False, "缺少 telegram_id", code=400)
+    
+    # 检查是否已绑定其他 Telegram
+    if user.TELEGRAM_ID and user.TELEGRAM_ID != telegram_id:
+        return api_response(False, "您已绑定其他 Telegram 账号，请先解绑或使用换绑功能", code=400)
+    
+    # 检查该 Telegram ID 是否已被其他用户绑定
+    existing = await UserOperate.get_user_by_telegram_id(telegram_id)
+    if existing and existing.UID != user.UID:
+        return api_response(False, "该 Telegram 账号已被其他用户绑定", code=400)
+    
+    # 绑定
+    user.TELEGRAM_ID = telegram_id
+    await UserOperate.update_user(user)
+    
+    return api_response(True, "Telegram 绑定成功", {
+        'telegram_id': telegram_id,
+    })
+
+
+@users_bp.route('/me/telegram/unbind', methods=['POST'])
+@async_route
+@require_auth
+async def unbind_my_telegram():
+    """
+    解绑 Telegram 账号
+    
+    注意：如果系统强制要求绑定 Telegram，则不允许解绑
+    """
+    from src.config import Config
+    
+    user = g.current_user
+    
+    # 检查是否强制绑定
+    if Config.FORCE_BIND_TELEGRAM:
+        return api_response(False, "系统要求必须绑定 Telegram，不允许解绑。如需更换账号请使用换绑功能", code=403)
+    
+    # 检查是否已绑定
+    if not user.TELEGRAM_ID:
+        return api_response(False, "您尚未绑定 Telegram", code=400)
+    
+    old_telegram_id = user.TELEGRAM_ID
+    user.TELEGRAM_ID = None
+    await UserOperate.update_user(user)
+    
+    return api_response(True, "Telegram 已解绑", {
+        'old_telegram_id': old_telegram_id,
+    })
+
+
+@users_bp.route('/me/telegram/change', methods=['POST'])
+@async_route
+@require_auth
+async def change_my_telegram():
+    """
+    换绑 Telegram 账号
+    
+    Request:
+        {
+            "new_telegram_id": 987654321
+        }
+    """
+    user = g.current_user
+    data = request.get_json() or {}
+    new_telegram_id = data.get('new_telegram_id')
+    
+    if not new_telegram_id:
+        return api_response(False, "缺少 new_telegram_id", code=400)
+    
+    # 检查是否已绑定
+    if not user.TELEGRAM_ID:
+        return api_response(False, "您尚未绑定 Telegram，请使用绑定功能", code=400)
+    
+    # 检查新 ID 是否与旧 ID 相同
+    if user.TELEGRAM_ID == new_telegram_id:
+        return api_response(False, "新 Telegram ID 与当前绑定的相同", code=400)
+    
+    # 检查新 Telegram ID 是否已被其他用户绑定
+    existing = await UserOperate.get_user_by_telegram_id(new_telegram_id)
+    if existing and existing.UID != user.UID:
+        return api_response(False, "该 Telegram 账号已被其他用户绑定", code=400)
+    
+    old_telegram_id = user.TELEGRAM_ID
+    user.TELEGRAM_ID = new_telegram_id
+    await UserOperate.update_user(user)
+    
+    return api_response(True, "Telegram 换绑成功", {
+        'old_telegram_id': old_telegram_id,
+        'new_telegram_id': new_telegram_id,
+    })
+
+
 # ==================== 自动续期 ====================
 
 @users_bp.route('/me/auto-renew', methods=['GET'])
@@ -440,13 +666,33 @@ async def renew_by_score():
 @require_auth
 async def get_my_settings():
     """获取用户所有设置"""
-    from src.config import ScoreAndRegisterConfig, DeviceLimitConfig
+    from src.config import ScoreAndRegisterConfig, DeviceLimitConfig, Config, EmbyConfig
+    from src.services import EmbyService
+    
+    user = g.current_user
+    
+    # 检查 NSFW 权限
+    nsfw_library_id = EmbyConfig.EMBY_NSFW
+    has_nsfw_permission = False
+    if nsfw_library_id and user.EMBYID:
+        library_ids, enable_all = await EmbyService.get_user_library_access(user)
+        has_nsfw_permission = enable_all or (nsfw_library_id in library_ids)
     
     return api_response(True, "获取成功", {
-        'auto_renew': g.current_user.AUTO_RENEW,
-        'nsfw_enabled': g.current_user.NSFW,
-        'bgm_mode': g.current_user.BGM_MODE,
-        'api_key_enabled': g.current_user.APIKEY_STATUS,
+        # 用户设置
+        'auto_renew': user.AUTO_RENEW,
+        'nsfw_enabled': user.NSFW,
+        'nsfw_can_toggle': has_nsfw_permission,
+        'bgm_mode': user.BGM_MODE,
+        'api_key_enabled': user.APIKEY_STATUS,
+        # Telegram 绑定
+        'telegram': {
+            'bound': bool(user.TELEGRAM_ID),
+            'force_bind': Config.FORCE_BIND_TELEGRAM,
+            'can_unbind': not Config.FORCE_BIND_TELEGRAM and bool(user.TELEGRAM_ID),
+            'can_change': bool(user.TELEGRAM_ID),
+        },
+        # 系统配置
         'system_config': {
             'auto_renew_enabled': ScoreAndRegisterConfig.AUTO_RENEW_ENABLED,
             'auto_renew_cost': ScoreAndRegisterConfig.AUTO_RENEW_COST,
@@ -454,6 +700,7 @@ async def get_my_settings():
             'device_limit_enabled': DeviceLimitConfig.DEVICE_LIMIT_ENABLED,
             'max_devices': DeviceLimitConfig.MAX_DEVICES,
             'max_streams': DeviceLimitConfig.MAX_STREAMS,
+            'nsfw_library_configured': bool(nsfw_library_id),
         },
     })
 
