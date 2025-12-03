@@ -24,21 +24,66 @@ async def list_users():
     获取用户列表
     
     Query:
-        page: int - 页码（从1开始）
+        page: int - 页码（从1开始，默认1）
         per_page: int - 每页数量（默认20，最大100）
-        role: int - 按角色筛选
-        active: bool - 按状态筛选
-    
-    TODO: 实现分页查询
+        role: int - 按角色筛选 (0=管理员, 1=普通用户, 2=白名单)
+        active: bool - 按状态筛选 (true/false)
+        search: str - 搜索用户名
     """
-    # page = request.args.get('page', 1, type=int)
-    # per_page = min(request.args.get('per_page', 20, type=int), 100)
+    page = request.args.get('page', 1, type=int)
+    per_page = min(request.args.get('per_page', 20, type=int), 100)
+    role = request.args.get('role', type=int)
+    active = request.args.get('active')
+    search = request.args.get('search', '').strip()
     
-    return api_response(True, "功能开发中", {
-        'users': [],
-        'total': 0,
-        'page': 1,
-        'per_page': 20,
+    # 转换 active 参数
+    active_status = None
+    if active is not None:
+        active_status = active.lower() == 'true'
+    
+    # 计算偏移量
+    offset = (page - 1) * per_page
+    
+    # 获取用户列表
+    users = await UserOperate.get_all_users(
+        offset=offset,
+        limit=per_page,
+        role=role,
+        active_status=active_status
+    )
+    
+    # 获取总数
+    total = await UserOperate.get_registered_users_count()
+    
+    # 如果有搜索条件，在内存中过滤（简单实现）
+    if search:
+        users = [u for u in users if search.lower() in (u.USERNAME or '').lower()]
+    
+    # 转换为字典
+    user_list = []
+    for user in users:
+        user_list.append({
+            'uid': user.UID,
+            'telegram_id': user.TELEGRAM_ID,
+            'username': user.USERNAME,
+            'email': user.EMAIL,
+            'role': user.ROLE,
+            'role_name': Role(user.ROLE).name if user.ROLE in [r.value for r in Role] else 'UNKNOWN',
+            'active': user.ACTIVE_STATUS,
+            'emby_id': user.EMBYID,
+            'expired_at': user.EXPIRED_AT,
+            'register_time': user.REGISTER_TIME,
+            'last_login_time': user.LAST_LOGIN_TIME,
+            'auto_renew': user.AUTO_RENEW,
+            'bgm_mode': user.BGM_MODE,
+        })
+    
+    return api_response(True, f"共 {len(user_list)} 个用户", {
+        'users': user_list,
+        'total': total,
+        'page': page,
+        'per_page': per_page,
+        'pages': (total + per_page - 1) // per_page,
     })
 
 
@@ -218,6 +263,89 @@ async def set_user_admin(uid: int):
     return api_response(success, message)
 
 
+@admin_bp.route('/users/<int:uid>/unbind-telegram', methods=['POST'])
+@async_route
+@require_auth
+@require_admin
+async def unbind_user_telegram(uid: int):
+    """
+    解绑用户的 Telegram
+    
+    解绑后用户将无法通过 Telegram 登录，但可以通过 API Key 或其他方式访问。
+    解绑后 Telegram ID 会被清空，用户可以重新绑定其他 Telegram 账号。
+    """
+    user = await UserOperate.get_user_by_uid(uid)
+    if not user:
+        return api_response(False, "用户不存在", code=404)
+    
+    if not user.TELEGRAM_ID:
+        return api_response(False, "该用户未绑定 Telegram", code=400)
+    
+    old_telegram_id = user.TELEGRAM_ID
+    user.TELEGRAM_ID = None
+    await UserOperate.update_user(user)
+    
+    return api_response(True, f"已解绑 Telegram (原 ID: {old_telegram_id})", {
+        'uid': uid,
+        'username': user.USERNAME,
+        'old_telegram_id': old_telegram_id,
+    })
+
+
+@admin_bp.route('/users/<int:uid>/bind-telegram', methods=['POST'])
+@async_route
+@require_auth
+@require_admin
+async def bind_user_telegram(uid: int):
+    """
+    为用户绑定 Telegram
+    
+    Request:
+        {
+            "telegram_id": 123456789
+        }
+    """
+    user = await UserOperate.get_user_by_uid(uid)
+    if not user:
+        return api_response(False, "用户不存在", code=404)
+    
+    data = request.get_json() or {}
+    telegram_id = data.get('telegram_id')
+    
+    if not telegram_id:
+        return api_response(False, "缺少 telegram_id", code=400)
+    
+    # 检查该 Telegram ID 是否已被其他用户绑定
+    existing = await UserOperate.get_user_by_telegram_id(telegram_id)
+    if existing and existing.UID != uid:
+        return api_response(False, f"该 Telegram ID 已被用户 {existing.USERNAME} 绑定", code=400)
+    
+    old_telegram_id = user.TELEGRAM_ID
+    user.TELEGRAM_ID = telegram_id
+    await UserOperate.update_user(user)
+    
+    return api_response(True, "绑定成功", {
+        'uid': uid,
+        'username': user.USERNAME,
+        'telegram_id': telegram_id,
+        'old_telegram_id': old_telegram_id,
+    })
+
+
+@admin_bp.route('/users/by-telegram/<int:telegram_id>', methods=['GET'])
+@async_route
+@require_auth
+@require_admin
+async def get_user_by_telegram(telegram_id: int):
+    """根据 Telegram ID 查找用户"""
+    user = await UserOperate.get_user_by_telegram_id(telegram_id)
+    if not user:
+        return api_response(False, "未找到绑定该 Telegram ID 的用户", code=404)
+    
+    user_info = await UserService.get_user_info(user)
+    return api_response(True, "找到用户", user_info)
+
+
 # ==================== 积分管理 ====================
 
 @admin_bp.route('/users/<int:uid>/score', methods=['PUT'])
@@ -257,18 +385,24 @@ async def list_regcodes():
     
     Query:
         type: int - 类型筛选 (1=注册, 2=续期, 3=白名单)
+        active: bool - 是否只显示有效的注册码
     """
     code_type = request.args.get('type', type=int)
+    active_only = request.args.get('active', 'false').lower() == 'true'
     
     if code_type:
         codes = await RegCodeOperate.get_regcodes_by_type(code_type)
     else:
-        # TODO: 实现获取所有注册码的方法
-        codes = []
+        codes = await RegCodeOperate.get_all_regcodes()
     
-    return api_response(True, "获取成功", [{
+    # 过滤有效的
+    if active_only:
+        codes = [c for c in codes if c.ACTIVE]
+    
+    return api_response(True, f"共 {len(codes)} 个注册码", [{
         'code': c.CODE,
         'type': c.TYPE,
+        'type_name': {1: '注册', 2: '续期', 3: '白名单'}.get(c.TYPE, '未知'),
         'validity_time': c.VALIDITY_TIME,
         'use_count': c.USE_COUNT,
         'use_count_limit': c.USE_COUNT_LIMIT,

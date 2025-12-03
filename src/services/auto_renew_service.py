@@ -83,7 +83,7 @@ class AutoRenewService:
                 await ScoreOperate.update_score(score)
                 
                 # 续期
-                success, msg = await UserService.renew(user.UID, renew_days)
+                success, msg = await UserService.renew_user(user, renew_days)
                 
                 if success:
                     renewed += 1
@@ -161,7 +161,8 @@ class AutoRenewService:
         if not user:
             return False, "用户不存在"
         
-        await UserOperate.update_user(uid=uid, auto_renew=enabled)
+        user.AUTO_RENEW = enabled
+        await UserOperate.update_user(user)
         
         status = "开启" if enabled else "关闭"
         return True, f"自动续期已{status}"
