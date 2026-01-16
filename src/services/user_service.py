@@ -531,6 +531,63 @@ class UserService:
         return True, f"续期成功！增加 {days} 天"
 
     @staticmethod
+    async def renew_by_score(user: UserModel) -> Tuple[bool, str]:
+        """使用积分续期"""
+        if not ScoreAndRegisterConfig.AUTO_RENEW_ENABLED:
+            return False, "积分续期功能未开启"
+        
+        renew_days = ScoreAndRegisterConfig.AUTO_RENEW_DAYS
+        renew_cost = ScoreAndRegisterConfig.AUTO_RENEW_COST
+        
+        # 检查积分
+        score = await ScoreOperate.get_score_by_uid(user.UID)
+        if not score or score.SCORE < renew_cost:
+            current = score.SCORE if score else 0
+            return False, f"积分不足，需要 {renew_cost} {ScoreAndRegisterConfig.SCORE_NAME}，当前 {current}"
+        
+        # 扣除积分
+        score.SCORE -= renew_cost
+        if hasattr(score, 'TOTAL_SPENT'):
+            score.TOTAL_SPENT = (score.TOTAL_SPENT or 0) + renew_cost
+        await ScoreOperate.update_score(score)
+        
+        # 执行续期
+        success, msg = await UserService.renew_user(user, renew_days)
+        
+        if success:
+            # 记录历史
+            from src.db.score import ScoreHistoryOperate
+            await ScoreHistoryOperate.add_history(
+                uid=user.UID,
+                type_='renew',
+                amount=-renew_cost,
+                balance_after=score.SCORE,
+                note=f"使用积分续期 {renew_days} 天"
+            )
+            
+            # 通知（可选）
+            if user.TELEGRAM_ID and ScoreAndRegisterConfig.AUTO_RENEW_NOTIFY:
+                from src.services.notification import NotificationService, Notification, NotificationType
+                try:
+                    await NotificationService.send(Notification(
+                        type=NotificationType.USER_RENEWED,
+                        title="✅ 积分续期成功",
+                        content=f"使用 {renew_cost} {ScoreAndRegisterConfig.SCORE_NAME} 续期 {renew_days} 天成功！",
+                        target_users=[user.TELEGRAM_ID]
+                    ))
+                except:
+                    pass
+            
+            return True, f"续期成功！增加 {renew_days} 天，花费 {renew_cost} 积分"
+        else:
+            # 退还积分
+            score.SCORE += renew_cost
+            if hasattr(score, 'TOTAL_SPENT'):
+                score.TOTAL_SPENT = (score.TOTAL_SPENT or 0) - renew_cost
+            await ScoreOperate.update_score(score)
+            return False, f"续期失败: {msg}"
+
+    @staticmethod
     async def disable_user(user: UserModel, reason: str = "") -> Tuple[bool, str]:
         """禁用用户"""
         try:

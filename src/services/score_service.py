@@ -468,12 +468,7 @@ class RedPacketService:
         :return: (成功, 消息, 获得金额)
         """
         # 获取红包
-        red_packets = await ScoreOperate.get_active_red_packets()
-        red_packet = None
-        for rp in red_packets:
-            if rp.RP_KEY == rp_key:
-                red_packet = rp
-                break
+        red_packet = await ScoreOperate.get_red_packet_by_key(rp_key)
 
         if not red_packet:
             return False, "红包不存在或已领完", 0
@@ -549,12 +544,7 @@ class RedPacketService:
         :param rp_key: 红包 Key
         :param user_uid: 用户 UID
         """
-        red_packets = await ScoreOperate.get_active_red_packets()
-        red_packet = None
-        for rp in red_packets:
-            if rp.RP_KEY == rp_key:
-                red_packet = rp
-                break
+        red_packet = await ScoreOperate.get_red_packet_by_key(rp_key)
 
         if not red_packet:
             return False, "红包不存在或已失效"

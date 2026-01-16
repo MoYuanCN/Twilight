@@ -211,5 +211,5 @@ __marimo__/
 .node_modules
 webui/node_modules
 webui/.next
-db/
+/db/
 config.toml
