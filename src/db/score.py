@@ -171,6 +171,13 @@ class ScoreOperate:
             return list[RedPacketModel](result.scalars().all())
 
     @staticmethod
+    async def get_red_packet_by_key(rp_key: str) -> Optional[RedPacketModel]:
+        """根据红包 Key 获取活跃红包记录"""
+        async with ScoreSessionFactory() as session:
+            scalar = await session.execute(select(RedPacketModel).filter_by(RP_KEY=rp_key, STATUS=0).limit(1))
+            return scalar.scalar_one_or_none()
+
+    @staticmethod
     async def update_red_packet(red_packet: RedPacketModel) -> None:
         """更新红包记录"""
         async with ScoreSessionFactory() as session:
