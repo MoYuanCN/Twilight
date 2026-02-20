@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { useAuthStore } from "@/store/auth";
 import {
@@ -45,95 +46,159 @@ const adminNavItems = [
 export function Sidebar() {
   const pathname = usePathname();
   const { user, logout } = useAuthStore();
-  const { theme, setTheme } = useTheme();
+  const { setTheme, themes, theme: currentTheme } = useTheme();
   const isAdmin = user?.role === 0;
 
+  const toggleTheme = (event: React.MouseEvent) => {
+    const x = event.clientX;
+    const y = event.clientY;
+
+    const nextTheme = currentTheme === "light" ? "bloom" : "light";
+
+    if (!(document as any).startViewTransition) {
+      setTheme(nextTheme);
+      return;
+    }
+
+    const transition = (document as any).startViewTransition(async () => {
+      setTheme(nextTheme);
+    });
+
+    transition.ready.then(() => {
+      const radius = Math.hypot(
+        Math.max(x, window.innerWidth - x),
+        Math.max(y, window.innerHeight - y)
+      );
+
+      document.documentElement.animate(
+        {
+          clipPath: [
+            `circle(0px at ${x}px ${y}px)`,
+            `circle(${radius}px at ${x}px ${y}px)`,
+          ],
+        },
+        {
+          duration: 500,
+          easing: "ease-in-out",
+          pseudoElement: "::view-transition-new(root)",
+        }
+      );
+    });
+  };
+
   return (
-    <aside className="fixed left-0 top-0 z-40 h-screen w-64 border-r bg-card/50 backdrop-blur-xl">
+    <aside className="fixed left-0 top-0 z-40 h-screen w-64 border-r border-white/40 glass-acrylic transition-all duration-500">
       <div className="flex h-full flex-col">
         {/* Logo */}
-        <div className="flex h-16 items-center gap-2 border-b px-6">
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-twilight-500 to-sunset-500">
-            <Sparkles className="h-5 w-5 text-white" />
+        <div className="flex h-20 items-center gap-3 border-b border-white/20 px-6">
+          <div className="group relative flex h-10 w-10 items-center justify-center rounded-2xl bg-primary shadow-lg shadow-primary/20 transition-all hover:scale-110 active:scale-95">
+            <Sparkles className="h-6 w-6 text-primary-foreground" />
           </div>
-          <span className="text-xl font-bold gradient-text">Twilight</span>
+          <div className="flex flex-col">
+            <span className="text-xl font-black tracking-tight text-foreground bg-clip-text text-transparent bg-gradient-to-br from-foreground to-foreground/70">Twilight</span>
+            <span className="text-[9px] font-bold text-primary/60 uppercase tracking-widest leading-none">Studio</span>
+          </div>
         </div>
 
         {/* User Nav */}
-        <nav className="flex-1 space-y-1 px-3 py-4">
-          <p className="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-            用户功能
-          </p>
+        <nav className="flex-1 space-y-1.5 px-3 py-6 overflow-y-auto custom-scrollbar">
+          <div className="mb-4 px-3">
+            <p className="text-[10px] font-black uppercase tracking-[0.3em] text-muted-foreground/60">
+              Menu
+            </p>
+          </div>
           {userNavItems.map((item) => (
             <Link
               key={item.href}
               href={item.href}
               className={cn(
-                "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all",
+                "group relative flex items-center gap-3 rounded-2xl px-3 py-2.5 text-sm font-bold transition-all duration-500",
                 pathname === item.href
-                  ? "bg-primary/10 text-primary"
-                  : "text-muted-foreground hover:bg-accent hover:text-foreground"
+                  ? "glass-frosted text-primary shadow-lg shadow-primary/5"
+                  : "text-muted-foreground/80 hover:bg-white/40 hover:text-foreground"
               )}
             >
-              <item.icon className="h-4 w-4" />
+              <div className={cn(
+                "flex h-8 w-8 items-center justify-center rounded-xl transition-all duration-500",
+                pathname === item.href ? "bg-primary text-primary-foreground shadow-md shadow-primary/20" : "bg-white/50 text-muted-foreground group-hover:bg-primary group-hover:text-primary-foreground group-hover:shadow-md"
+              )}>
+                <item.icon className="h-4 w-4" />
+              </div>
               {item.label}
+              {pathname === item.href && (
+                <motion.div 
+                  layoutId="sidebar-active"
+                  className="absolute left-0 h-6 w-1 rounded-r-full bg-primary" 
+                />
+              )}
             </Link>
           ))}
 
           {isAdmin && (
             <>
-              <Separator className="my-4" />
-              <p className="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                管理功能
-              </p>
+              <div className="mt-10 mb-4 px-3">
+                <p className="text-[10px] font-black uppercase tracking-[0.3em] text-muted-foreground/60">
+                  Admin Control
+                </p>
+              </div>
               {adminNavItems.map((item) => (
                 <Link
                   key={item.href}
                   href={item.href}
                   className={cn(
-                    "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all",
+                    "group relative flex items-center gap-3 rounded-2xl px-3 py-2.5 text-sm font-bold transition-all duration-500",
                     pathname.startsWith(item.href)
-                      ? "bg-primary/10 text-primary"
-                      : "text-muted-foreground hover:bg-accent hover:text-foreground"
+                      ? "glass-frosted text-primary shadow-lg shadow-primary/5"
+                      : "text-muted-foreground/80 hover:bg-white/40 hover:text-foreground"
                   )}
                 >
-                  <item.icon className="h-4 w-4" />
+                  <div className={cn(
+                    "flex h-8 w-8 items-center justify-center rounded-xl transition-all duration-500",
+                    pathname.startsWith(item.href) ? "bg-primary text-primary-foreground shadow-md shadow-primary/20" : "bg-white/50 text-muted-foreground group-hover:bg-primary group-hover:text-primary-foreground group-hover:shadow-md"
+                  )}>
+                    <item.icon className="h-4 w-4" />
+                  </div>
                   {item.label}
+                  {pathname.startsWith(item.href) && (
+                    <motion.div 
+                      layoutId="sidebar-active-admin"
+                      className="absolute left-0 h-6 w-1 rounded-r-full bg-primary" 
+                    />
+                  )}
                 </Link>
               ))}
             </>
           )}
         </nav>
 
-        {/* User Profile & Actions */}
-        <div className="border-t p-4">
-          <div className="flex items-center gap-3 rounded-lg bg-accent/50 p-3">
-            <Avatar>
-              <AvatarFallback>
+        {/* Action Buttons */}
+        <div className="mt-auto p-4 space-y-3">
+          <div className="flex items-center gap-3 rounded-[1.5rem] border border-white/50 bg-white/40 p-3 shadow-inner">
+            <Avatar className="h-10 w-10 border-2 border-white shadow-sm">
+              <AvatarFallback className="bg-primary text-primary-foreground text-xs font-black">
                 {user?.username?.slice(0, 2).toUpperCase() || "U"}
               </AvatarFallback>
             </Avatar>
             <div className="flex-1 truncate">
-              <p className="text-sm font-medium">{user?.username}</p>
-              <p className="text-xs text-muted-foreground">{user?.role_name}</p>
+              <p className="text-sm font-black text-foreground truncate">{user?.username}</p>
+              <p className="text-[9px] text-primary/70 uppercase font-black tracking-widest leading-none mt-0.5">{user?.role_name}</p>
             </div>
           </div>
 
-          <div className="mt-3 flex gap-2">
+          <div className="flex gap-2">
             <Button
-              variant="ghost"
+              variant="outline"
               size="icon"
-              onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-              className="flex-1"
+              onClick={toggleTheme}
+              className="flex-1 h-11 rounded-2xl bg-white/60 hover:bg-white border-white/40 shadow-sm"
             >
-              <Sun className="h-4 w-4 rotate-0 scale-100 transition-all dark:-rotate-90 dark:scale-0" />
-              <Moon className="absolute h-4 w-4 rotate-90 scale-0 transition-all dark:rotate-0 dark:scale-100" />
+              <Sun className={cn("h-4 w-4 transition-all", currentTheme === "bloom" ? "text-orange-500" : "text-amber-500")} />
             </Button>
             <Button
-              variant="ghost"
+              variant="outline"
               size="icon"
               onClick={logout}
-              className="flex-1 hover:text-destructive"
+              className="flex-1 h-11 rounded-2xl bg-white/60 hover:bg-red-50 hover:text-red-500 border-white/40 shadow-sm"
             >
               <LogOut className="h-4 w-4" />
             </Button>
