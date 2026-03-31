@@ -207,23 +207,23 @@ export default function RegisterPage() {
                 />
               </div>
 
-              {systemInfo?.features?.force_bind_telegram && (
-                <div className="space-y-2">
-                  <Label htmlFor="telegramId" className="ml-1">Telegram ID *</Label>
-                  <Input
-                    id="telegramId"
-                    name="telegramId"
-                    type="number"
-                    placeholder="你的 Telegram 数字 ID"
-                    value={formData.telegramId}
-                    onChange={handleChange}
-                    className="h-11"
-                  />
-                  <p className="ml-1 text-xs text-muted-foreground">
-                    可通过 Telegram 中 @userinfobot 获取
-                  </p>
-                </div>
-              )}
+              <div className="space-y-2">
+                <Label htmlFor="telegramId" className="ml-1">
+                  Telegram ID {systemInfo?.features?.force_bind_telegram ? "*" : ""}
+                </Label>
+                <Input
+                  id="telegramId"
+                  name="telegramId"
+                  type="number"
+                  placeholder="你的 Telegram 数字 ID"
+                  value={formData.telegramId}
+                  onChange={handleChange}
+                  className="h-11"
+                />
+                <p className="ml-1 text-xs text-muted-foreground">
+                  可通过 Telegram 中 @userinfobot 获取
+                </p>
+              </div>
 
               <div className="pt-4">
                 <Button
