@@ -11,11 +11,13 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { useAuthStore } from "@/store/auth";
+import { useSystemStore } from "@/store/system";
 
 export default function LoginPage() {
   const router = useRouter();
   const { toast } = useToast();
   const { login } = useAuthStore();
+  const { info: systemInfo, fetchInfo: fetchSystemInfo } = useSystemStore();
   
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -24,7 +26,8 @@ export default function LoginPage() {
 
   useEffect(() => {
     router.prefetch("/dashboard");
-  }, [router]);
+    void fetchSystemInfo();
+  }, [router, fetchSystemInfo]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -80,7 +83,7 @@ export default function LoginPage() {
             </div>
 
             <CardTitle className="text-2xl font-semibold tracking-tight">
-              登录 Twilight
+              登录 {systemInfo?.name || "Twilight"}
             </CardTitle>
             <CardDescription className="text-sm">
               访问你的媒体控制台

@@ -40,6 +40,7 @@ async def get_system_info():
             'transfer': ScoreAndRegisterConfig.PRIVATE_TRANSFER_MODE,
             'auto_renew': ScoreAndRegisterConfig.AUTO_RENEW_ENABLED,
             'invite': ScoreAndRegisterConfig.INVITE_ENABLED,
+            'force_bind_telegram': Config.FORCE_BIND_TELEGRAM,
         },
         'limits': {
             'user_limit': ScoreAndRegisterConfig.USER_LIMIT,

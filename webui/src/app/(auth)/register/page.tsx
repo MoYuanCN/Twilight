@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
@@ -11,10 +11,16 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { api } from "@/lib/api";
+import { useSystemStore } from "@/store/system";
 
 export default function RegisterPage() {
   const router = useRouter();
   const { toast } = useToast();
+  const { info: systemInfo, fetchInfo: fetchSystemInfo } = useSystemStore();
+
+  useEffect(() => {
+    void fetchSystemInfo();
+  }, [fetchSystemInfo]);
   
   const [formData, setFormData] = useState({
     username: "",
@@ -22,6 +28,7 @@ export default function RegisterPage() {
     confirmPassword: "",
     email: "",
     regCode: "",
+    telegramId: "",
   });
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -36,6 +43,15 @@ export default function RegisterPage() {
     if (!formData.username || !formData.password) {
       toast({
         title: "请填写完整信息",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (systemInfo?.features?.force_bind_telegram && !formData.telegramId) {
+      toast({
+        title: "请填写 Telegram ID",
+        description: "当前服务器要求绑定 Telegram",
         variant: "destructive",
       });
       return;
@@ -66,6 +82,7 @@ export default function RegisterPage() {
         password: formData.password,
         email: formData.email || undefined,
         reg_code: formData.regCode || undefined,
+        telegram_id: formData.telegramId ? Number(formData.telegramId) : undefined,
       });
       
       if (res.success) {
@@ -108,7 +125,7 @@ export default function RegisterPage() {
             </div>
 
             <CardTitle className="text-2xl font-semibold tracking-tight">
-              加入 Twilight
+              加入 {systemInfo?.name || "Twilight"}
             </CardTitle>
             <CardDescription className="text-sm">
               创建一个新的账户
@@ -189,6 +206,24 @@ export default function RegisterPage() {
                   className="h-11"
                 />
               </div>
+
+              {systemInfo?.features?.force_bind_telegram && (
+                <div className="space-y-2">
+                  <Label htmlFor="telegramId" className="ml-1">Telegram ID *</Label>
+                  <Input
+                    id="telegramId"
+                    name="telegramId"
+                    type="number"
+                    placeholder="你的 Telegram 数字 ID"
+                    value={formData.telegramId}
+                    onChange={handleChange}
+                    className="h-11"
+                  />
+                  <p className="ml-1 text-xs text-muted-foreground">
+                    可通过 Telegram 中 @userinfobot 获取
+                  </p>
+                </div>
+              )}
 
               <div className="pt-4">
                 <Button
