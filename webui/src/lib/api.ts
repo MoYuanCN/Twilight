@@ -207,6 +207,11 @@ class ApiClient {
     this.setToken(null);
   }
 
+  // System
+  async getSystemInfo() {
+    return this.request<SystemInfo>("/system/info");
+  }
+
   // User
   async getMe() {
     const res = await this.request<UserInfo>("/users/me");
@@ -360,6 +365,19 @@ class ApiClient {
 
   async renewWithRegcode(regCode: string) {
     return this.request<{ expire_status: string; expired_at: string | number }>("/users/me/renew", {
+      method: "POST",
+      body: JSON.stringify({ reg_code: regCode }),
+    });
+  }
+
+  async useCode(regCode: string) {
+    return this.request<{
+      emby_password?: string;
+      expire_status: string;
+      expired_at: string | number;
+      role: number;
+      role_name: string;
+    }>("/users/me/use-code", {
       method: "POST",
       body: JSON.stringify({ reg_code: regCode }),
     });
@@ -522,6 +540,17 @@ class ApiClient {
     });
   }
 
+  async getConfigSchema() {
+    return this.request<ConfigSchema>("/system/admin/config/schema");
+  }
+
+  async updateConfigBySchema(sections: Record<string, Record<string, unknown>>) {
+    return this.request("/system/admin/config/schema", {
+      method: "PUT",
+      body: JSON.stringify({ sections }),
+    });
+  }
+
   async getAllApis() {
     return this.request<{ apis: Array<{ method: string; path: string; endpoint: string; full_path: string }>; total: number }>("/system/admin/apis");
   }
@@ -534,6 +563,19 @@ class ApiClient {
     return this.request<{ nsfw_library_name: string }>("/system/admin/emby/nsfw", {
       method: "PUT",
       body: JSON.stringify({ library_name: libraryName }),
+    });
+  }
+
+  async setUserLibraries(uid: number, libraryNames: string[], enableAll: boolean = false) {
+    return this.request(`/admin/users/${uid}/libraries`, {
+      method: "PUT",
+      body: JSON.stringify({ library_names: libraryNames, enable_all: enableAll }),
+    });
+  }
+
+  async syncAllEmbyUsers() {
+    return this.request<{ success: number; failed: number; errors: string[] }>("/admin/emby/sync", {
+      method: "POST",
     });
   }
 
@@ -562,6 +604,17 @@ class ApiClient {
   async refreshApiKey() {
     return this.request<{ apikey: string; enabled: boolean }>("/auth/apikey", {
       method: "POST",
+    });
+  }
+
+  async getApiKeyPermissions() {
+    return this.request<{ permissions: string[] }>("/auth/apikey/permissions");
+  }
+
+  async updateApiKeyPermissions(permissions: string[]) {
+    return this.request<{ permissions: string[] }>("/auth/apikey/permissions", {
+      method: "PUT",
+      body: JSON.stringify({ permissions }),
     });
   }
 
@@ -731,6 +784,15 @@ class ApiClient {
 export const api = new ApiClient();
 
 // Types
+export interface SystemInfo {
+  name: string;
+  icon: string;
+  version: string;
+  features: Record<string, boolean>;
+  limits: Record<string, number | null>;
+  score: Record<string, string | number>;
+}
+
 export interface User {
   uid: number;
   username: string;
@@ -747,6 +809,7 @@ export interface UserInfo {
   role: number;
   role_name: string;
   active: boolean;
+  expire_status?: string;  // 后端计算的状态文本（"永不过期"/"已过期"/"剩余 x天"）
   expired_at?: string | number;  // 可能是时间戳或字符串，-1 表示永久
   emby_id?: string;
   avatar?: string;
@@ -758,7 +821,10 @@ export interface UserInfo {
     has_permission: boolean;
     nsfw_library_name?: string;
   };
-  created_at: string;
+  nsfw_enabled?: boolean;  // 后端返回的 NSFW 开关
+  nsfw_allowed?: boolean;  // 后端返回的 NSFW 权限
+  created_at?: string | number;
+  register_time?: number;
   is_pending?: boolean;  // 是否待激活
 }
 
@@ -1071,5 +1137,30 @@ export interface CreateRegcodeData {
   validity_time?: number; // 注册码有效期（小时），-1 表示永久
   use_count_limit?: number; // 使用次数限制，-1 表示无限
   count?: number;
+}
+
+export interface ConfigFieldOption {
+  label: string;
+  value: number | string;
+}
+
+export interface ConfigField {
+  key: string;
+  label: string;
+  type: 'string' | 'int' | 'float' | 'bool' | 'secret' | 'list' | 'select';
+  description: string;
+  value: unknown;
+  options?: ConfigFieldOption[];
+}
+
+export interface ConfigSection {
+  key: string;
+  title: string;
+  description: string;
+  fields: ConfigField[];
+}
+
+export interface ConfigSchema {
+  sections: ConfigSection[];
 }
 

@@ -55,20 +55,25 @@
 - **IP 限制** - IP 黑名单、登录失败锁定
 - **登录日志** - 完整的登录记录追踪
 - **API 认证** - 支持 API Key 和 Token 双认证
+- **API Key 权限** - 细粒度权限控制（6 种权限范围）
 - **会话管理** - 多设备登录管理
+- **NSFW 独立权限** - NSFW 与常规媒体库权限分离
 
 ### 📡 扩展集成
 - **RESTful API** - 完整的 REST API 支持前端开发
 - **API Key 接口** - 专门为外部系统设计的 API Key 认证接口
 - **Webhook** - 接收和推送 Webhook 事件
 - **Telegram Bot** - 可选的 Telegram 机器人交互（需手动开启）
+- **Emby 批量同步** - 定时同步 Emby 用户状态
 
 ### 🖥️ Web 管理界面
 - **现代化 UI** - 基于 Next.js 16 的现代化管理界面
 - **响应式设计** - 完美支持桌面和移动设备
 - **实时数据** - 实时更新的用户数据和统计信息
-- **配置管理** - 管理员可直接在 Web 界面管理配置文件
+- **配置管理** - 管理员可直接在 Web 界面管理配置文件（可视化编辑器）
 - **API 测试工具** - 内置 API 测试工具，支持列出所有接口
+- **背景自定义** - 用户可自定义主页背景（CSS 渐变 / 图片 URL / 本地上传）
+- **服务器品牌** - 可配置服务器名称和图标
 
 ---
 
@@ -256,7 +261,7 @@ emby_url_list = [
     "Direct : http://127.0.0.1:8096/",
     "Sample : http://192.168.1.1:8096/"
 ]
-# NSFW 库 ID (可选)
+# NSFW 库名称 (Emby 中的媒体库名称，不区分大小写)
 emby_nsfw = ""
 ```
 
@@ -270,6 +275,10 @@ score_name = "暮光币"
 register_mode = false
 # 用户数量上限
 user_limit = 200
+# 是否允许无 Emby 账户的用户签到
+allow_no_emby_checkin = true
+# 是否允许无 Emby 账户的用户查看部分信息
+allow_no_emby_view = true
 
 # 签到配置
 checkin_base_score = 10          # 签到基础奖励
@@ -283,6 +292,7 @@ auto_renew_enabled = false       # 是否允许积分自动续期
 auto_renew_days = 30             # 自动续期天数
 auto_renew_cost = 100            # 自动续期所需积分
 auto_renew_before_days = 3       # 到期前几天自动续期
+auto_renew_notify = true         # 续期后是否通知用户
 ```
 
 ### 设备限制
@@ -313,6 +323,10 @@ debug = false
 token_expire = 86400
 # 是否允许跨域 (CORS)
 cors_enabled = true
+# 服务器名称（用于前端显示）
+server_name = "Twilight"
+# 服务器图标 URL（用于前端显示）
+server_icon = ""
 ```
 
 ### Bangumi 同步
@@ -329,6 +343,16 @@ private_collection = true
 block_keywords = []
 # 最小播放进度（百分比）才算看完
 min_progress_percent = 80
+```
+
+### 定时任务
+
+```toml
+[Scheduler]
+# 自动续期执行时间 (HH:MM)
+auto_renew_time = "02:00"
+# Emby 批量同步间隔 (小时)
+emby_sync_interval = 6
 ```
 
 > 📝 完整配置请参考 `config.production.toml`
@@ -383,8 +407,9 @@ min_progress_percent = 80
 - **求片审核** - 审核用户的求片请求
 - **数据统计** - 查看系统统计数据
 - **安全管理** - 查看登录日志、设备管理、IP 黑名单
-- **配置管理** - 在线编辑 `config.toml` 配置文件
+- **配置管理** - 在线可视化编辑 `config.toml` 配置文件
 - **API 测试** - 测试 API 接口，列出所有可用接口
+- **Emby 同步** - 定时批量同步 Emby 用户状态
 
 ---
 
@@ -593,38 +618,7 @@ make format  # 或 .\dev.ps1 -Task format
 
 ---
 
-## 📞 获取帮助
-
-- 📖 查看 [文档](docs/)
-- 🐛 提交 [Issue](https://github.com/Prejudice-Studio/Twilight/issues)
-- 💬 讨论 [Discussions](https://github.com/Prejudice-Studio/Twilight/discussions)
-- 📧 发送邮件至 contact@twilight.example.com
-
----
-
-## 📄 许可证
-
-本项目采用 [MIT 许可证](LICENSE)。详见 [LICENSE](LICENSE) 文件。
-
----
-
-## 🙏 特别感谢
-
-感谢所有做出贡献的开发者，以及使用 Twilight 的用户！
-
----
-
-<div align="center">
-
-**[⬆ 回到顶部](#twilight-暮光)**
-
-Made with ❤️ by [Prejudice Studio](https://github.com/Prejudice-Studio)
-
-</div>
-
----
-
-## 🐛 故障排除
+## � 故障排除
 
 ### 常见问题
 
@@ -642,13 +636,19 @@ A: 检查 API Key 是否正确，是否已启用，账号是否被禁用。
 
 **Q: 签到失败**
 
-A: 检查用户是否已绑定 Emby 账号，账号是否已激活。
+A: 检查用户是否已绑定 Emby 账号，账号是否已激活。如开启了 `allow_no_emby_checkin`，无 Emby 账号也可签到。
+
+**Q: 数据库迁移错误（缺少列）**
+
+A: 运行 `python migrate.py` 执行数据库迁移，添加新版本所需的列。
 
 ---
 
-## 🤝 贡献
+## 📞 获取帮助
 
-欢迎提交 Issue 和 Pull Request！
+- 📖 查看 [文档](docs/)
+- 🐛 提交 [Issue](https://github.com/Prejudice-Studio/Twilight/issues)
+- 💬 讨论 [Discussions](https://github.com/Prejudice-Studio/Twilight/discussions)
 
 ---
 

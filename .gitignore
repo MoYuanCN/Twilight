@@ -152,3 +152,4 @@ start_all.bat
 OPTIMIZATION_SUMMARY.md
 /tests
 config.toml
+*.backup
