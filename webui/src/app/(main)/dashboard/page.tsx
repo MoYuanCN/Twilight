@@ -38,7 +38,7 @@ import { useAsyncResource } from "@/hooks/use-async-resource";
 import { useRegionRefresh } from "@/hooks/use-region-refresh";
 import { PageError } from "@/components/layout/page-state";
 import { useAuthStore } from "@/store/auth";
-import { api, type ScoreInfo, type PlaybackStats } from "@/lib/api";
+import { api, type ScoreInfo, type PlaybackStats, type TopMediaItem } from "@/lib/api";
 import { formatRelativeTime, formatNumber, cn } from "@/lib/utils";
 import { RegionRefreshKeys } from "@/lib/region-refresh";
 
