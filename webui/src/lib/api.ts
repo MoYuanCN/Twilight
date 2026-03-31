@@ -1,6 +1,5 @@
-// API 请求走相对路径，由 Next.js rewrite / Vercel rewrites 代理到后端
-// 静态资源（头像、背景图等）需要后端绝对地址
-const ASSET_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+// 后端 API 地址
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
 
 interface ApiResponse<T = unknown> {
   success: boolean;
@@ -27,9 +26,9 @@ class ApiClient {
       return url;
     }
     if (url.startsWith("/")) {
-      return `${ASSET_BASE}${url}`;
+      return `${API_BASE}${url}`;
     }
-    return `${ASSET_BASE}/${url}`;
+    return `${API_BASE}/${url}`;
   }
 
   private normalizeCssUrlValue(value?: string | null): string {
@@ -78,7 +77,7 @@ class ApiClient {
       headers["Authorization"] = `Bearer ${token}`;
     }
 
-    const url = `/api/v1${endpoint}`;
+    const url = `${API_BASE}/api/v1${endpoint}`;
     
     let response: Response;
     try {
@@ -154,7 +153,7 @@ class ApiClient {
       headers["Authorization"] = `Bearer ${token}`;
     }
 
-    const url = `/api/v1${endpoint}`;
+    const url = `${API_BASE}/api/v1${endpoint}`;
 
     let response: Response;
     try {

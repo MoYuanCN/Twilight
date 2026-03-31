@@ -118,7 +118,8 @@ export default function AdminTestPage() {
         headers["Authorization"] = `Bearer ${token}`;
       }
       
-      const url = `/api/v1${test.endpoint}`;
+      const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+      const url = `${apiBase}/api/v1${test.endpoint}`;
       
       const fetchOptions: RequestInit = {
         method: test.method,
@@ -184,8 +185,10 @@ export default function AdminTestPage() {
         headers["Authorization"] = `Bearer ${token}`;
       }
 
+      const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000";
+      
       // 构建 URL（包含查询参数）
-      let url = `/api/v1${customEndpoint}`;
+      let url = `${apiBase}/api/v1${customEndpoint}`;
       if (customMethod === "GET" && customParams.length > 0) {
         const queryString = customParams
           .filter((p) => p.key && p.value)

@@ -17,9 +17,9 @@ BACKEND_PID=$!
 # 等待后端初始化
 sleep 2
 
-# 启动前端
+# 启动前端（生产模式）
 echo "Starting Frontend..."
-cd webui && npm run dev &
+cd webui && pnpm start -p 3000 &
 FRONTEND_PID=$!
 cd "$SCRIPT_DIR"
 

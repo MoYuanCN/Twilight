@@ -10,9 +10,9 @@ start "Twilight Backend" cmd /k "cd /d %~dp0 && .\\venv\\Scripts\\activate && py
 :: 等待 2 秒让后端初始化
 timeout /t 2 /nobreak > nul
 
-:: 启动前端
+:: 启动前端（生产模式）
 echo Starting Frontend...
-start "Twilight Frontend" cmd /k "cd /d %~dp0webui && npm run dev"
+start "Twilight Frontend" cmd /k "cd /d %~dp0webui && pnpm start -p 3000"
 
 :: 等待 5 秒让前端完全启动
 timeout /t 5 /nobreak > nul

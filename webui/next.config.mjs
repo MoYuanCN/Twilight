@@ -1,12 +1,14 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // standalone 模式用于 Docker 自部署，Vercel 会自动忽略此项
+  // standalone 模式：build 后可独立运行，无需 node_modules
   output: 'standalone',
   // 允许开发环境的跨域请求
   allowedDevOrigins: ['127.0.0.1', 'localhost'],
-  // 将 /api/* 请求代理到后端（本地开发和 Docker 自部署使用）
-  // Vercel 部署时由 vercel.json 中的 rewrites 接管
+  // 本地开发时将 /api/* 代理到后端（避免跨域）
+  // 生产环境通过 NEXT_PUBLIC_API_URL 直连后端
   async rewrites() {
+    // 仅当未设置 NEXT_PUBLIC_API_URL 时启用代理（即本地开发）
+    if (process.env.NEXT_PUBLIC_API_URL) return [];
     const backendUrl = process.env.BACKEND_URL || 'http://localhost:5000';
     return [
       {
