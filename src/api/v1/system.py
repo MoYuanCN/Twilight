@@ -405,7 +405,17 @@ async def update_config_toml():
         NotificationConfig.update_from_toml('Notification')
         BangumiSyncConfig.update_from_toml('BangumiSync')
         
-        return api_response(True, "配置已更新并重新加载", {
+        # 延迟重启进程以加载新配置
+        import threading
+        def _restart():
+            import time, os, sys, logging as _log
+            time.sleep(2)
+            _log.getLogger(__name__).info("🔄 配置已更新，正在重启程序...")
+            os.execv(sys.executable, [sys.executable] + sys.argv)
+        
+        threading.Thread(target=_restart, daemon=True).start()
+        
+        return api_response(True, "配置已更新，程序将在 2 秒后自动重启", {
             'path': str(config_file),
         })
     except Exception as e:
@@ -484,6 +494,8 @@ async def get_config_schema():
                     {'key': 'group_id', 'label': '群组 ID', 'type': 'list', 'description': 'Telegram 群组 ID 列表，支持数字ID（如 -1001234567890）或 @用户名（如 @mygroup）', 'value': TelegramConfig.GROUP_ID},
                     {'key': 'channel_id', 'label': '频道 ID', 'type': 'list', 'description': 'Telegram 频道 ID 列表，支持数字ID（如 -1001234567890）或 @用户名（如 @mychannel）', 'value': TelegramConfig.CHANNEL_ID},
                     {'key': 'force_subscribe', 'label': '强制订阅', 'type': 'bool', 'description': '是否要求用户订阅频道后才能使用', 'value': TelegramConfig.FORCE_SUBSCRIBE},
+                    {'key': 'enable_tg_panel', 'label': '启用 TG 面板', 'type': 'bool', 'description': '启用后 Bot 提供完整的内联键盘面板功能，关闭则仅保留 /help、/bind、/me 基础命令', 'value': TelegramConfig.ENABLE_TG_PANEL},
+                    {'key': 'proxy_url', 'label': '代理地址', 'type': 'string', 'description': 'Telegram Bot 代理地址（如 socks5://127.0.0.1:1080），留空不使用代理', 'value': TelegramConfig.PROXY_URL},
                 ],
             },
             {
@@ -684,7 +696,17 @@ async def update_config_by_schema():
         NotificationConfig.update_from_toml('Notification')
         BangumiSyncConfig.update_from_toml('BangumiSync')
         
-        return api_response(True, "配置已更新并重新加载")
+        # 延迟重启进程以加载新配置
+        import threading
+        def _restart():
+            import time, os, sys, logging as _log
+            time.sleep(2)  # 等待响应返回
+            _log.getLogger(__name__).info("🔄 配置已更新，正在重启程序...")
+            os.execv(sys.executable, [sys.executable] + sys.argv)
+        
+        threading.Thread(target=_restart, daemon=True).start()
+        
+        return api_response(True, "配置已更新，程序将在 2 秒后自动重启")
     except Exception as e:
         import logging
         logging.getLogger(__name__).error(f"更新配置文件失败: {e}", exc_info=True)
