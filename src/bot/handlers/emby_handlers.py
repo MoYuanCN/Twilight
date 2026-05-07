@@ -4,7 +4,6 @@ Emby 服务 + Inline 面板处理器
 /emby - Emby 信息
 /lines - 线路信息
 /playinfo - 播放统计
-/playrank - 播放排行
 
 注意：密码重置等敏感操作已移至网页端
 """
@@ -114,25 +113,6 @@ def register(bot):
         ])
         await safe_edit_message(query.message, text, reply_markup=kb)
 
-    # ======================== 播放排行 ========================
-
-    @require_panel
-    @require_subscribe
-    async def cb_emby_playrank(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """播放排行入口"""
-        query = update.callback_query
-        await answer_callback_safe(query)
-        await _show_playrank(query.message, "today")
-
-    async def cb_playrank_period(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """播放排行切换周期"""
-        query = update.callback_query
-        await answer_callback_safe(query)
-        period = query.data.replace("playrank_", "")
-        if period not in ("today", "week", "month", "all"):
-            period = "today"
-        await _show_playrank(query.message, period)
-
     # ======================== 传统命令（兼容） ========================
 
     @require_private
@@ -191,35 +171,6 @@ def register(bot):
         await update.message.reply_text(text, parse_mode="Markdown")
 
     @require_private
-    @require_panel
-    @require_subscribe
-    async def cmd_playrank(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """播放排行"""
-        period = context.args[0] if context.args else "today"
-        if period not in ("today", "week", "month", "all"):
-            period = "today"
-
-        period_names = {"today": "今日", "week": "本周", "month": "本月", "all": "总"}
-        ranking = await StatsService.get_ranking(period=period, limit=10)
-        if not ranking:
-            await update.message.reply_text("📊 暂无排行数据")
-            return
-
-        lines = [f"🏆 **{period_names[period]}播放排行榜**\n"]
-        medals = ["🥇", "🥈", "🥉"]
-        for item in ranking:
-            medal = medals[item['rank'] - 1] if item['rank'] <= 3 else f"{item['rank']}."
-            lines.append(f"{medal} `{item['username']}` - {item['value_str']}")
-
-        kb = InlineKeyboardMarkup([[
-            InlineKeyboardButton("今日", callback_data="playrank_today"),
-            InlineKeyboardButton("本周", callback_data="playrank_week"),
-            InlineKeyboardButton("本月", callback_data="playrank_month"),
-            InlineKeyboardButton("总榜", callback_data="playrank_all"),
-        ]])
-        await update.message.reply_text("\n".join(lines), reply_markup=kb, parse_mode="Markdown")
-
-    @require_private
     @require_admin
     async def cmd_sessions(update: Update, context: ContextTypes.DEFAULT_TYPE):
         """查看活跃会话"""
@@ -265,7 +216,6 @@ def register(bot):
     app.add_handler(CommandHandler("lines", cmd_lines))
     app.add_handler(CommandHandler("resetpwd", cmd_resetpwd))
     app.add_handler(CommandHandler("playinfo", cmd_playinfo))
-    app.add_handler(CommandHandler("playrank", cmd_playrank))
     app.add_handler(CommandHandler("sessions", cmd_sessions))
     app.add_handler(CommandHandler("kick", cmd_kick))
 
@@ -274,8 +224,6 @@ def register(bot):
     app.add_handler(CallbackQueryHandler(cb_emby_lines, pattern="^emby_lines$"))
     app.add_handler(CallbackQueryHandler(cb_emby_resetpwd, pattern="^emby_resetpwd$"))
     app.add_handler(CallbackQueryHandler(cb_emby_playinfo, pattern="^emby_playinfo$"))
-    app.add_handler(CallbackQueryHandler(cb_emby_playrank, pattern="^emby_playrank$"))
-    app.add_handler(CallbackQueryHandler(cb_playrank_period, pattern=r"^playrank_"))
 
 
 # ======================== 辅助函数 ========================
@@ -286,9 +234,6 @@ def _emby_menu_kb() -> InlineKeyboardMarkup:
         [
             InlineKeyboardButton("🌐 线路信息", callback_data="emby_lines"),
             InlineKeyboardButton("📊 播放统计", callback_data="emby_playinfo"),
-        ],
-        [
-            InlineKeyboardButton("🏆 播放排行", callback_data="emby_playrank"),
         ],
         [InlineKeyboardButton("♻️ 主菜单", callback_data="back_start")],
     ])
@@ -326,28 +271,3 @@ def _format_lines_text(user=None) -> str:
     return "\n".join(parts)
 
 
-async def _show_playrank(message, period: str):
-    """显示播放排行"""
-    period_names = {"today": "今日", "week": "本周", "month": "本月", "all": "总"}
-    ranking = await StatsService.get_ranking(period=period, limit=10)
-
-    if not ranking:
-        text = "📊 暂无排行数据"
-    else:
-        lines = [f"🏆 **{period_names.get(period, '今日')}播放排行榜**\n"]
-        medals = ["🥇", "🥈", "🥉"]
-        for item in ranking:
-            medal = medals[item['rank'] - 1] if item['rank'] <= 3 else f"{item['rank']}."
-            lines.append(f"{medal} `{item['username']}` - {item['value_str']}")
-        text = "\n".join(lines)
-
-    kb = InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("今日", callback_data="playrank_today"),
-            InlineKeyboardButton("本周", callback_data="playrank_week"),
-            InlineKeyboardButton("本月", callback_data="playrank_month"),
-            InlineKeyboardButton("总榜", callback_data="playrank_all"),
-        ],
-        [InlineKeyboardButton("🔙 Emby", callback_data="panel_emby")],
-    ])
-    await safe_edit_message(message, text, reply_markup=kb)

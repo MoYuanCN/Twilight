@@ -27,10 +27,10 @@
 | **Emby/Jellyfin 管理** | 用户注册/续期/禁用、媒体库权限控制、NSFW 独立权限、会话与设备管理、账号绑定 |
 | **积分系统** | 每日签到（连签加成）、积分转账、拼手气/均分红包、积分续期、排行榜 |
 | **求片功能** | TMDB + Bangumi 多源搜索、库存自动检查（含季度）、请求-审核流程 |
-| **Bangumi 同步** | Webhook 接收播放事件，自动标记 Bangumi 观看记录，支持 Emby/Jellyfin/Plex |
+| **Bangumi 同步** | 支持账号绑定与条目同步能力，便于统一追番状态 |
 | **安全** | 设备数/播放数限制、IP 黑名单、登录日志、API Key 细粒度权限（6 种范围） |
 | **Web 管理界面** | 基于 Next.js 16 的响应式 UI，可视化配置编辑器、内置 API 测试工具 |
-| **扩展集成** | RESTful API、API Key 外部接口、Webhook 推送、可选 Telegram Bot |
+| **扩展集成** | RESTful API、API Key 外部接口、可选 Telegram Bot |
 
 ---
 
@@ -84,6 +84,16 @@ cd webui && pnpm install && pnpm dev
 # 访问 http://localhost:3000
 ```
 
+### 一键启动（开发）
+
+```bash
+# Windows
+start_all.bat
+
+# Linux/macOS
+bash ./start_all.sh
+```
+
 ### 首次使用
 
 1. 在 `config.toml` 中配置 Emby 地址、Token，以及管理员用户名
@@ -107,11 +117,14 @@ cd webui && pnpm install && pnpm dev
 
 ---
 
-## 🔌 Webhook 配置（Bangumi 同步）
+## 🔐 安全与适配说明（2026-05）
 
-**Emby**：管理面板 → 通知 → Webhook → URL 填 `https://your-domain/api/v1/webhook/bangumi/emby` → 勾选「播放-停止」
-
-**Jellyfin**：安装 Webhook 插件 → Generic Destination → URL 填 `https://your-domain/api/v1/webhook/bangumi/jellyfin`
+- 认证：`require_auth` 已调整为强制 Bearer Token，避免未认证绕过。
+- 用户隐私：用户背景与头像查询接口已增加鉴权与越权检查。
+- 文件安全：头像删除流程已增加路径归一化与目录边界检查，防止路径穿越。
+- Emby 策略：参考 Sakura 的策略更新思路，重写了按媒体库名称显隐的策略更新流程。
+- 性能：管理员用户列表改为数据库侧搜索 + 批量积分查询，减少 N+1 查询。
+- 前端移动端：新增手机端侧滑导航、弹窗宽高自适配、管理用户页面手机卡片布局。
 
 ---
 
@@ -126,32 +139,7 @@ cd webui && pnpm install && pnpm dev
 
 ## 📄 许可证 License
 
-``` LICENSE
-
-MIT License
-
-Copyright (c) 2025 Prejudice Studio
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-
-
-```
+本项目基于 [MIT License](LICENSE) 开源，完整条款见项目根目录 `LICENSE`。
 
 ---
 

@@ -164,17 +164,15 @@ async def _store_token(token: str, uid: int) -> dict:
     return payload
 
 def require_auth(f: Callable) -> Callable:
-    """要求认证的装饰器（管理员可选认证）"""
+    """要求认证的装饰器（必须提供有效 Bearer Token）"""
     @wraps(f)
     async def wrapper(*args, **kwargs):
         # 从请求头获取 token
         auth_header = request.headers.get('Authorization', '')
-        
-        # 如果没有提供 token，尝试作为公开接口处理
+
+        # 必须提供 Bearer Token
         if not auth_header or not auth_header.startswith('Bearer '):
-            # 没有认证，设置 g.current_user 为 None，让接口自行决定是否需要认证
-            g.current_user = None
-            return await f(*args, **kwargs)
+            return api_response(False, "需要认证", code=401)
         
         token = auth_header[7:]  # 移除 "Bearer " 前缀
         

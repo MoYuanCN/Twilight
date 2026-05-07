@@ -272,7 +272,7 @@ export default function AdminRequestsPage() {
                               className="h-3 w-auto"
                             />
                           ) : request.source.toLowerCase() === "bangumi" ? (
-                            <div className="flex items-center gap-1 bg-[#f09199]/10 px-1.5 py-0.5 rounded text-[10px] font-bold text-[#f09199] border border-[#f09199]/20">
+                            <div className="flex items-center gap-1 bg-[#f09199]/10 dark:bg-[#f09199]/20 px-1.5 py-0.5 rounded text-[10px] font-bold text-[#d95b67] dark:text-[#ffb3bc] border border-[#f09199]/20 dark:border-[#f09199]/40">
                               <Image
                                 src="https://bangumi.tv/img/favicon.ico"
                                 alt="Bangumi"
@@ -294,7 +294,7 @@ export default function AdminRequestsPage() {
                         <span>•</span>
                         <span className="flex items-center gap-0.5" title="External Update Key">
                           <Fingerprint className="h-3 w-3" />
-                          <code className="bg-muted px-1 rounded">{request.require_key}</code>
+                          <code className="bg-muted text-foreground px-1 rounded">{request.require_key}</code>
                         </span>
                         <span>•</span>
                         <span>{request.media_info?.media_type === "movie" ? "电影" : "剧集"}</span>
@@ -337,7 +337,7 @@ export default function AdminRequestsPage() {
                       <Button
                         size="icon"
                         variant="ghost"
-                        className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                        className="h-8 w-8 text-muted-foreground hover:text-destructive dark:hover:bg-destructive/15"
                         onClick={() => handleDelete(request.id)}
                         title="删除请求"
                       >

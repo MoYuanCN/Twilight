@@ -1,23 +1,23 @@
 """
 Bangumi 同步服务
 
-通过 Webhook 实现 Emby/Jellyfin 观看记录同步到 Bangumi
+通过播放记录数据实现观看记录同步到 Bangumi
 参考: https://github.com/SanaeMio/Bangumi-syncer
 """
 import json
 import logging
 import re
-from typing import Optional, Dict, Any, List, Tuple
+from typing import Optional, Dict, Any, List
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 
-from src.config import Config
 from src.db.bangumi import BangumiUserModel, BangumiUserOperate
 from src.db.user import UserOperate
 from src.services.bangumi import (
     BangumiClient, BangumiSubject, BangumiError,
     get_bangumi_client, SubjectType, EpStatus
 )
+from src.services.bangumi_search import BangumiSearchAPI
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +32,7 @@ class SyncRequest:
     episode: int              # 集数
     release_date: str         # 发布日期 YYYY-MM-DD
     user_name: str            # 用户名
-    source: str = 'custom'    # 来源: custom/emby/jellyfin/plex
+    source: str = 'api'       # 来源标识（如 api/manual）
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'SyncRequest':
@@ -44,72 +44,7 @@ class SyncRequest:
             episode=int(data.get('episode', 0) or 0),
             release_date=data.get('release_date', ''),
             user_name=data.get('user_name', ''),
-            source=data.get('source', 'custom'),
-        )
-    
-    @classmethod
-    def from_emby(cls, data: Dict[str, Any]) -> 'SyncRequest':
-        """从 Emby Webhook 数据解析"""
-        item = data.get('Item', {})
-        user = data.get('User', {})
-        
-        # 提取季度和集数
-        season = 1
-        episode = 0
-        
-        if item.get('Type') == 'Episode':
-            season = item.get('ParentIndexNumber', 1) or 1
-            episode = item.get('IndexNumber', 0) or 0
-        
-        # 发布日期
-        premiere_date = item.get('PremiereDate', '')
-        if premiere_date:
-            premiere_date = premiere_date[:10]  # 只取日期部分
-        
-        return cls(
-            media_type='episode',
-            title=item.get('SeriesName', item.get('Name', '')),
-            original_title=item.get('OriginalTitle', ''),
-            season=season,
-            episode=episode,
-            release_date=premiere_date,
-            user_name=user.get('Name', ''),
-            source='emby',
-        )
-    
-    @classmethod
-    def from_jellyfin(cls, data: Dict[str, Any]) -> 'SyncRequest':
-        """从 Jellyfin Webhook 数据解析"""
-        # Jellyfin webhook 插件格式
-        if 'SeriesName' in data:
-            return cls(
-                media_type=data.get('ItemType', 'episode').lower(),
-                title=data.get('SeriesName', ''),
-                original_title='',
-                season=int(data.get('SeasonNumber', 1) or 1),
-                episode=int(data.get('EpisodeNumber', 0) or 0),
-                release_date=f"{data.get('Year', '')}-01-01" if data.get('Year') else '',
-                user_name=data.get('NotificationUsername', ''),
-                source='jellyfin',
-            )
-        # 和 Emby 格式相同
-        return cls.from_emby(data)
-    
-    @classmethod
-    def from_plex(cls, data: Dict[str, Any]) -> 'SyncRequest':
-        """从 Plex Webhook 数据解析"""
-        metadata = data.get('Metadata', {})
-        account = data.get('Account', {})
-        
-        return cls(
-            media_type='episode',
-            title=metadata.get('grandparentTitle', metadata.get('title', '')),
-            original_title='',
-            season=int(metadata.get('parentIndex', 1) or 1),
-            episode=int(metadata.get('index', 0) or 0),
-            release_date=metadata.get('originallyAvailableAt', ''),
-            user_name=account.get('title', ''),
-            source='plex',
+            source=data.get('source', 'api'),
         )
 
 
@@ -131,6 +66,8 @@ class BangumiSyncService:
     
     # 搜索缓存 (title -> subject_id)
     _search_cache: Dict[str, int] = {}
+    _search_cache_time: Dict[str, float] = {}
+    _search_cache_ttl_seconds: float = 3600.0
     
     # 屏蔽关键词
     _block_keywords: List[str] = []
@@ -220,8 +157,13 @@ class BangumiSyncService:
         
         # 2. 检查缓存
         cache_key = f"{title}:{season}"
+        import time as _time
         if cache_key in cls._search_cache:
-            return cls._search_cache[cache_key]
+            cached_at = cls._search_cache_time.get(cache_key, 0)
+            if (_time.time() - cached_at) < cls._search_cache_ttl_seconds:
+                return cls._search_cache[cache_key]
+            cls._search_cache.pop(cache_key, None)
+            cls._search_cache_time.pop(cache_key, None)
         
         client = get_bangumi_client()
         
@@ -282,8 +224,23 @@ class BangumiSyncService:
         
         if best_match and best_score > 0.5:
             cls._search_cache[cache_key] = best_match.id
+            cls._search_cache_time[cache_key] = _time.time()
             logger.info(f"匹配到 Bangumi 条目: {title} -> {best_match.title} (ID: {best_match.id}, 相似度: {best_score:.2f})")
             return best_match.id
+
+        # 4. 回退到更强的智能搜索策略，提升疑难标题命中率
+        try:
+            smart_match = await BangumiSearchAPI.search_subject(
+                name=title,
+                subject_type=SubjectType.ANIME.value,
+            )
+            if smart_match:
+                cls._search_cache[cache_key] = smart_match.id
+                cls._search_cache_time[cache_key] = _time.time()
+                logger.info(f"智能回退匹配成功: {title} -> {smart_match.title} (ID: {smart_match.id})")
+                return smart_match.id
+        except Exception as e:
+            logger.warning(f"智能回退搜索失败: {e}")
         
         logger.warning(f"未能匹配 Bangumi 条目: {title}")
         return None
@@ -377,55 +334,6 @@ class BangumiSyncService:
             await client.close()
     
     @classmethod
-    async def process_webhook(
-        cls,
-        data: Dict[str, Any],
-        source: str = 'custom'
-    ) -> SyncResult:
-        """
-        处理 Webhook 请求
-        
-        :param data: Webhook 数据
-        :param source: 来源 (custom/emby/jellyfin/plex)
-        """
-        # 解析请求
-        if source == 'emby':
-            request = SyncRequest.from_emby(data)
-        elif source == 'jellyfin':
-            request = SyncRequest.from_jellyfin(data)
-        elif source == 'plex':
-            request = SyncRequest.from_plex(data)
-        else:
-            request = SyncRequest.from_dict(data)
-        
-        logger.info(f"收到 Bangumi 同步请求: {request.title} S{request.season:02d}E{request.episode:02d} (用户: {request.user_name})")
-        
-        # 查找用户
-        if not request.user_name:
-            return SyncResult(False, "缺少用户名")
-        
-        # 通过用户名查找本地用户
-        user = await UserOperate.get_user_by_username(request.user_name)
-        if not user:
-            # 尝试通过 Emby 用户名查找
-            user = await UserOperate.get_user_by_emby_username(request.user_name)
-        
-        if not user:
-            return SyncResult(False, f"未找到用户: {request.user_name}")
-        
-        # 检查用户是否开启了 BGM 同步
-        if not user.BGM_MODE:
-            return SyncResult(False, f"用户 {request.user_name} 未开启 Bangumi 同步")
-        
-        # 获取用户的 Bangumi Token
-        token = await cls._get_user_bgm_token(user)
-        if not token:
-            return SyncResult(False, f"用户 {request.user_name} 未绑定 Bangumi 账号")
-        
-        # 同步
-        return await cls.sync_episode(request, token)
-    
-    @classmethod
     async def _get_user_bgm_token(cls, user) -> Optional[str]:
         """获取用户 Bangumi Token，优先使用个人设置。"""
         if user.BGM_TOKEN:
@@ -478,38 +386,4 @@ class BangumiSyncService:
         
         return await cls.sync_episode(request, token)
 
-
-# 注册 Webhook 处理器
-async def bangumi_webhook_handler(payload) -> None:
-    """Bangumi Webhook 处理器"""
-    from src.services.webhook import WebhookPayload
-    
-    if not isinstance(payload, WebhookPayload):
-        return
-    
-    # 只处理播放停止事件
-    if payload.event != 'playback.stop':
-        return
-    
-    # 只处理剧集
-    if payload.item_type and payload.item_type.lower() != 'episode':
-        return
-    
-    # 检查是否已完成播放（可选：检查播放进度是否超过90%）
-    # 这里简单处理，只要是 stop 事件就同步
-    
-    # 构造请求
-    data = payload.raw_data
-    
-    # 判断来源
-    source = 'emby'  # 默认 Emby
-    if 'NotificationType' in data and 'Jellyfin' in data.get('Server', {}).get('Name', ''):
-        source = 'jellyfin'
-    
-    result = await BangumiSyncService.process_webhook(data, source)
-    
-    if result.success:
-        logger.info(f"Bangumi 同步成功: {result.message}")
-    else:
-        logger.warning(f"Bangumi 同步失败: {result.message}")
 

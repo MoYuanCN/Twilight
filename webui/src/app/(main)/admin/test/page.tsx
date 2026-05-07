@@ -12,7 +12,6 @@ const FEATURE_LABELS: Record<string, string> = {
   register: "开放注册",
   score_register: "积分注册",
   telegram: "Telegram Bot",
-  webhook: "Webhook 通知",
   red_packet: "红包功能",
   transfer: "转账功能",
   auto_renew: "自动续期",
@@ -22,7 +21,6 @@ const FEATURE_LABELS: Record<string, string> = {
 
 const LIMIT_LABELS: Record<string, string> = {
   user_limit: "用户上限",
-  device_limit: "设备上限",
   stream_limit: "同时播放上限",
 };
 

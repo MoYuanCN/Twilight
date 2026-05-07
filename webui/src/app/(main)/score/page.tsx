@@ -11,7 +11,6 @@ import {
   Gift,
   RefreshCw,
   Loader2,
-  Trophy,
   Ticket,
   Plus,
 } from "lucide-react";
@@ -34,7 +33,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useAsyncResource } from "@/hooks/use-async-resource";
 import { PageError } from "@/components/layout/page-state";
 import { useAuthStore } from "@/store/auth";
-import { api, type ScoreInfo, type ScoreRecord, type ScoreRankingItem } from "@/lib/api";
+import { api, type ScoreInfo, type ScoreRecord } from "@/lib/api";
 import { formatNumber, formatDate } from "@/lib/utils";
 
 const container = {
@@ -67,10 +66,6 @@ export default function ScorePage() {
   const [renewOpen, setRenewOpen] = useState(false);
   const [renewDays, setRenewDays] = useState("30");
   const [isRenewing, setIsRenewing] = useState(false);
-  
-  // Ranking state
-  const [ranking, setRanking] = useState<ScoreRankingItem[]>([]);
-  const [isRankingLoading, setIsRankingLoading] = useState(false);
 
   // Red Packet state
   const [redPacketOpen, setRedPacketOpen] = useState(false);
@@ -156,20 +151,6 @@ export default function ScorePage() {
       toast({ title: "续期失败", description: error.message, variant: "destructive" });
     } finally {
       setIsRenewing(false);
-    }
-  };
-
-  const loadRanking = async () => {
-    setIsRankingLoading(true);
-    try {
-      const res = await api.getScoreRanking();
-      if (res.success && res.data) {
-        setRanking(res.data.ranking);
-      }
-    } catch (error) {
-      console.error(error);
-    } finally {
-      setIsRankingLoading(false);
     }
   };
 
@@ -343,9 +324,8 @@ export default function ScorePage() {
       </div>
 
       <Tabs defaultValue="history" className="w-full">
-        <TabsList className="grid w-full grid-cols-3 mb-6">
+        <TabsList className="mb-6 grid w-full grid-cols-2">
           <TabsTrigger value="history">积分历史</TabsTrigger>
-          <TabsTrigger value="ranking" onClick={loadRanking}>榜单</TabsTrigger>
           <TabsTrigger value="redpacket">红包</TabsTrigger>
         </TabsList>
 
@@ -497,64 +477,6 @@ export default function ScorePage() {
                           <p className="text-xs text-muted-foreground">
                             余额: {formatNumber(record.balance_after)}
                           </p>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          </motion.div>
-        </TabsContent>
-
-        <TabsContent value="ranking">
-          <motion.div variants={item}>
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Trophy className="h-5 w-5 text-yellow-500" />
-                  积分排行榜
-                </CardTitle>
-                <CardDescription>看看谁才是暮光之巅</CardDescription>
-              </CardHeader>
-              <CardContent>
-                {isRankingLoading ? (
-                  <div className="flex h-32 items-center justify-center">
-                    <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-                  </div>
-                ) : ranking.length === 0 ? (
-                  <div className="flex h-32 items-center justify-center text-muted-foreground">
-                    排行榜加载失败
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    {ranking.map((row, idx) => (
-                      <div
-                        key={row.uid}
-                        className={`flex items-center justify-between rounded-lg p-3 ${
-                          idx === 0
-                            ? "bg-yellow-500/10 border border-yellow-500/20"
-                            : idx === 1
-                            ? "bg-slate-400/10 border border-slate-400/20"
-                            : idx === 2
-                            ? "bg-amber-600/10 border border-amber-600/20"
-                            : "bg-accent/30"
-                        }`}
-                      >
-                        <div className="flex items-center gap-4">
-                          <div className={`flex h-8 w-8 items-center justify-center rounded-full font-bold ${
-                            idx === 0 ? "text-yellow-600" : idx === 1 ? "text-slate-500" : idx === 2 ? "text-amber-700" : "text-muted-foreground"
-                          }`}>
-                            {idx + 1}
-                          </div>
-                          <div>
-                            <p className="font-medium">{row.username}</p>
-                            <p className="text-xs text-muted-foreground">UID: {row.uid}</p>
-                          </div>
-                        </div>
-                        <div className="text-right">
-                          <p className="font-bold text-primary">{formatNumber(row.score)}</p>
-                          <p className="text-xs text-muted-foreground">连签 {row.checkin_days} 天</p>
                         </div>
                       </div>
                     ))}

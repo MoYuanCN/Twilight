@@ -3,7 +3,9 @@
 
 提供用户相关的 CRUD 操作
 """
+import json
 import logging
+from urllib.parse import urlparse
 from flask import Blueprint, request, g
 
 from src.api.v1.auth import require_auth, api_response
@@ -24,12 +26,13 @@ async def register():
     
     Request:
         {
-            "username": "myusername",       // 必填
-            "password": "mypassword",       // Web 端必填，Telegram 端可选（自动生成）
-            "telegram_id": 123456789,       // 可选，Telegram 用户 ID
-            "reg_code": "code-xxx",         // 注册码注册
-            "email": "user@example.com",    // 可选
-            "use_score": false              // 是否使用积分注册
+            "username": "myusername",            // 必填
+            "password": "mypassword",            // Web 端必填，Telegram 端可选（自动生成）
+            "telegram_bind_code": "123456",      // 推荐，注册前先在 Bot 中验证
+            "reg_code": "code-xxx",              // 系统账号：注册码注册
+            "email": "user@example.com",         // 可选
+            "use_score": false,                    // 系统账号：是否使用积分注册
+            "registration_target": "system"      // system | emby
         }
     
     Response:
@@ -47,6 +50,8 @@ async def register():
     data = request.get_json() or {}
     
     telegram_id = data.get('telegram_id')
+    telegram_bind_code = (data.get('telegram_bind_code') or '').strip()
+    registration_target = (data.get('registration_target') or 'system').strip().lower()
     username = data.get('username')
     password = data.get('password')  # Web 端用户设置的密码
     reg_code = data.get('reg_code')
@@ -56,10 +61,36 @@ async def register():
     # 验证必要参数
     if not username:
         return api_response(False, "缺少用户名", code=400)
+
+    if registration_target not in ('system', 'emby'):
+        return api_response(False, "registration_target 仅支持 system 或 emby", code=400)
+
+    # 注册时不要直接提交 Telegram ID，请使用 Bot 绑定码验证
+    if telegram_id is not None:
+        return api_response(False, "请使用 Telegram Bot 绑定码验证 Telegram ID", code=400)
+
+    # 通过绑定码获取 Telegram ID（先解析，成功后再消费）
+    if telegram_bind_code:
+        telegram_id = _get_register_bind_telegram_id(telegram_bind_code)
+        if not telegram_id:
+            return api_response(False, "Telegram 绑定码无效或尚未通过 Bot 验证，请先在 Bot 中完成绑定", code=400)
+
+    # Telegram ID 类型校验
+    if telegram_id is not None and telegram_id != '':
+        if isinstance(telegram_id, str):
+            if telegram_id.isdigit():
+                telegram_id = int(telegram_id)
+        if not isinstance(telegram_id, int) or telegram_id <= 0:
+            return api_response(False, "telegram_id 格式无效", code=400)
+    else:
+        telegram_id = None
     
-    # 如果强制绑定 Telegram 但未提供 telegram_id
+    # Emby 队列注册必须绑定 Telegram；系统注册按全局配置决定
+    if registration_target == 'emby' and not telegram_id:
+        return api_response(False, "Emby 账号注册需要先完成 Telegram 绑定", code=400)
+
     if Config.FORCE_BIND_TELEGRAM and not telegram_id:
-        return api_response(False, "系统要求绑定 Telegram，请提供 telegram_id", code=400)
+        return api_response(False, "系统要求绑定 Telegram，请先获取绑定码并通过 Bot 验证", code=400)
     
     # Web 端注册：没有 telegram_id 时必须提供密码
     if not telegram_id and not password:
@@ -80,7 +111,34 @@ async def register():
         if not is_valid_email(email):
             return api_response(False, "邮箱格式不正确", code=400)
     
-    # 注册
+    # Emby 账号注册：进入队列异步处理
+    if registration_target == 'emby':
+        from src.services import EmbyRegisterQueueService
+
+        queue_result, message = await EmbyRegisterQueueService.enqueue(
+            telegram_id=telegram_id,
+            username=username,
+            email=email,
+            password=password,
+        )
+
+        if not queue_result:
+            return api_response(False, message, code=400)
+
+        # 队列受理后消费绑定码，避免重复提交
+        if telegram_bind_code and telegram_bind_code in _tg_bind_codes:
+            del _tg_bind_codes[telegram_bind_code]
+
+        return api_response(True, message, {
+            'registration_target': 'emby',
+            'request_id': queue_result.get('request_id'),
+            'status_token': queue_result.get('status_token'),
+            'status': queue_result.get('status'),
+            'queue_position': queue_result.get('queue_position'),
+            'reused': queue_result.get('reused', False),
+        })
+
+    # 系统账号注册
     if use_score:
         result = await UserService.register_by_score(telegram_id, username, email, password)
     elif reg_code:
@@ -88,16 +146,38 @@ async def register():
     else:
         # 无码注册（待激活状态，只能签到）
         result = await UserService.register_pending(telegram_id, username, email, password)
-    
+
     if result.result.value == 'success':
+        if telegram_bind_code and telegram_bind_code in _tg_bind_codes:
+            del _tg_bind_codes[telegram_bind_code]
+
         user_info = await UserService.get_user_info(result.user) if result.user else None
         return api_response(True, result.message, {
+            'registration_target': 'system',
             'username': result.user.USERNAME if result.user else None,
             'password': result.emby_password if not password else None,  # 仅自动生成时返回
             'user': user_info,
         })
-    
+
     return api_response(False, result.message, code=400)
+
+
+@users_bp.route('/register/emby/status', methods=['GET'])
+async def get_emby_register_status():
+    """查询 Emby 注册队列状态。"""
+    from src.services import EmbyRegisterQueueService
+
+    request_id = (request.args.get('request_id') or '').strip()
+    status_token = (request.args.get('status_token') or '').strip()
+
+    if not request_id or not status_token:
+        return api_response(False, "缺少 request_id 或 status_token", code=400)
+
+    status = await EmbyRegisterQueueService.get_status(request_id, status_token)
+    if not status:
+        return api_response(False, "注册请求不存在或凭证无效", code=404)
+
+    return api_response(True, "获取成功", status)
 
 
 @users_bp.route('/check-available', methods=['GET'])
@@ -130,6 +210,8 @@ async def check_registration_available():
         'score_register_mode': ScoreAndRegisterConfig.SCORE_REGISTER_MODE,
         'score_register_need': ScoreAndRegisterConfig.SCORE_REGISTER_NEED,
         'allow_pending_register': ScoreAndRegisterConfig.ALLOW_PENDING_REGISTER,
+        'emby_direct_register_enabled': ScoreAndRegisterConfig.EMBY_DIRECT_REGISTER_ENABLED,
+        'emby_direct_register_days': ScoreAndRegisterConfig.EMBY_DIRECT_REGISTER_DAYS,
     })
 
 
@@ -485,11 +567,6 @@ async def bind_emby_account():
     if user.EMBYID:
         return api_response(False, "您已绑定 Emby 账号，请先解绑", code=400)
     
-    # 检查用户名是否已被其他用户使用
-    existing_user = await UserOperate.get_user_by_username(emby_username)
-    if existing_user and existing_user.UID != user.UID:
-        return api_response(False, "该用户名已被其他用户使用", code=400)
-    
     # 验证 Emby 用户名和密码
     emby = get_emby_client()
     try:
@@ -509,8 +586,16 @@ async def bind_emby_account():
         
         # 绑定账号
         user.EMBYID = emby_user.id
-        user.USERNAME = emby_username
-        
+        import json
+        other_data = {}
+        if user.OTHER:
+            try:
+                other_data = json.loads(user.OTHER)
+            except (json.JSONDecodeError, TypeError):
+                other_data = {}
+        other_data['emby_username'] = emby_user.name
+        user.OTHER = json.dumps(other_data)
+
         # 如果是管理员或白名单，保持永久有效期
         if user.ROLE in (Role.ADMIN.value, Role.WHITE_LIST.value):
             user.EXPIRED_AT = 253402214400  # 9999-12-31
@@ -537,10 +622,10 @@ async def bind_emby_account():
         
     except EmbyError as e:
         logger.error(f"绑定 Emby 账号失败: {e}")
-        return api_response(False, f"绑定失败: {e}", code=500)
+        return api_response(False, "绑定失败，请检查用户名密码或稍后重试", code=500)
     except Exception as e:
         logger.error(f"绑定 Emby 账号失败: {e}")
-        return api_response(False, f"绑定失败: {e}", code=500)
+        return api_response(False, "绑定失败，请稍后重试", code=500)
 
 
 @users_bp.route('/me/emby/unbind', methods=['POST'])
@@ -559,6 +644,15 @@ async def unbind_emby_account():
     # 解绑（不清除 Emby 账号，只清除本地关联）
     old_emby_id = user.EMBYID
     user.EMBYID = None
+    import json
+    if user.OTHER:
+        try:
+            other_data = json.loads(user.OTHER)
+        except (json.JSONDecodeError, TypeError):
+            other_data = {}
+        else:
+            other_data.pop('emby_username', None)
+            user.OTHER = json.dumps(other_data) if other_data else ''
     # 不修改用户名，保留原用户名
     await UserOperate.update_user(user)
     
@@ -971,7 +1065,7 @@ async def set_auto_renew():
 
 # ==================== Telegram 绑定码 ====================
 
-# 内存存储绑定码: {code: {uid, username, created_at}}
+# 内存存储绑定码: {code: {type, uid?, username?, created_at, confirmed_telegram_id?}}
 import time as _time
 import secrets as _secrets
 import string as _string
@@ -985,6 +1079,15 @@ def _cleanup_expired_codes():
     expired = [k for k, v in _tg_bind_codes.items() if now - v['created_at'] > _BIND_CODE_EXPIRE]
     for k in expired:
         del _tg_bind_codes[k]
+
+
+def _get_register_bind_telegram_id(bind_code: str) -> int | None:
+    """根据注册绑定码获取已确认的 Telegram ID"""
+    _cleanup_expired_codes()
+    code_info = _tg_bind_codes.get(bind_code)
+    if not code_info or code_info.get('type') != 'register':
+        return None
+    return code_info.get('confirmed_telegram_id')
 
 def _generate_bind_code() -> str:
     """生成 6 位数字绑定码"""
@@ -1033,11 +1136,42 @@ async def generate_tg_bind_code():
         code = _generate_bind_code()
     
     _tg_bind_codes[code] = {
+        'type': 'user',
         'uid': user.UID,
         'username': user.USERNAME,
         'created_at': _time.time(),
     }
     
+    return api_response(True, "绑定码已生成", {
+        'bind_code': code,
+        'expires_in': _BIND_CODE_EXPIRE,
+    })
+
+
+@users_bp.route('/telegram/register/bind-code', methods=['POST'])
+async def generate_tg_register_bind_code():
+    """
+    生成注册时使用的 Telegram 绑定码（无需登录）
+    """
+    from src.config import Config, TelegramConfig
+
+    if not Config.TELEGRAM_MODE or not TelegramConfig.BOT_TOKEN:
+        return api_response(False, "Telegram Bot 未启用", code=400)
+
+    # 清理过期绑定码
+    _cleanup_expired_codes()
+
+    # 生成新绑定码（确保不重复）
+    code = _generate_bind_code()
+    while code in _tg_bind_codes:
+        code = _generate_bind_code()
+
+    _tg_bind_codes[code] = {
+        'type': 'register',
+        'created_at': _time.time(),
+        'confirmed_telegram_id': None,
+    }
+
     return api_response(True, "绑定码已生成", {
         'bind_code': code,
         'expires_in': _BIND_CODE_EXPIRE,
@@ -1076,29 +1210,48 @@ async def confirm_tg_bind():
     code_info = _tg_bind_codes.get(bind_code)
     if not code_info:
         return api_response(False, "绑定码无效或已过期", code=400)
-    
-    uid = code_info['uid']
-    
-    # 检查该 Telegram ID 是否已被其他用户绑定
-    existing = await UserOperate.get_user_by_telegram_id(telegram_id)
-    if existing and existing.UID != uid:
-        return api_response(False, "该 Telegram 已绑定其他账号，一个 Telegram 只能绑定一个账号", code=400)
-    
-    # 绑定
-    user = await UserOperate.get_user_by_uid(uid)
-    if not user:
-        return api_response(False, "用户不存在", code=404)
-    
-    if user.TELEGRAM_ID:
+
+    if code_info.get('type') == 'user':
+        uid = code_info['uid']
+
+        # 检查该 Telegram ID 是否已被其他用户绑定
+        existing = await UserOperate.get_user_by_telegram_id(telegram_id)
+        if existing and existing.UID != uid:
+            return api_response(False, "该 Telegram 已绑定其他账号，一个 Telegram 只能绑定一个账号", code=400)
+
+        # 绑定
+        user = await UserOperate.get_user_by_uid(uid)
+        if not user:
+            return api_response(False, "用户不存在", code=404)
+
+        if user.TELEGRAM_ID:
+            del _tg_bind_codes[bind_code]
+            return api_response(False, "该账号已绑定 Telegram", code=400)
+
+        user.TELEGRAM_ID = telegram_id
+        await UserOperate.update_user(user)
+
+        # 删除已使用的绑定码
         del _tg_bind_codes[bind_code]
-        return api_response(False, "该账号已绑定 Telegram", code=400)
-    
-    user.TELEGRAM_ID = telegram_id
-    await UserOperate.update_user(user)
-    
-    # 删除已使用的绑定码
-    del _tg_bind_codes[bind_code]
-    
+    elif code_info.get('type') == 'register':
+        # 注册绑定码确认：只记录 Telegram ID，不直接绑定到用户
+        if code_info.get('confirmed_telegram_id') and code_info.get('confirmed_telegram_id') != telegram_id:
+            return api_response(False, "该绑定码已被其他 Telegram 账号使用", code=400)
+
+        existing = await UserOperate.get_user_by_telegram_id(telegram_id)
+        if existing:
+            return api_response(False, "该 Telegram 已绑定其他账号，一个 Telegram 只能绑定一个账号", code=400)
+
+        code_info['confirmed_telegram_id'] = telegram_id
+        _tg_bind_codes[bind_code] = code_info
+
+        logger.info(f"注册绑定码 {bind_code} 已由 Telegram {telegram_id} 验证")
+        return api_response(True, "Telegram 绑定码验证成功", {
+            'telegram_id': telegram_id,
+        })
+    else:
+        return api_response(False, "绑定码类型无效", code=400)
+
     logger.info(f"用户 {user.USERNAME} 通过 Bot 绑定 Telegram: {telegram_id}")
     
     from src.core.utils import format_expire_time
@@ -1238,9 +1391,25 @@ async def get_my_settings():
 
 # ==================== 背景管理 ====================
 
+def _is_valid_background_url(value: str) -> bool:
+    """仅允许 http(s) 或站内相对路径。"""
+    if not value:
+        return True
+    if value.startswith('/'):
+        return True
+    try:
+        parsed = urlparse(value)
+    except Exception:
+        return False
+    return parsed.scheme in ('http', 'https') and bool(parsed.netloc)
+
 @users_bp.route('/<int:uid>/background', methods=['GET'])
+@require_auth
 async def get_user_background(uid: int):
     """获取用户背景配置"""
+    if g.current_user.UID != uid and g.current_user.ROLE != Role.ADMIN.value:
+        return api_response(False, "无权限查看其他用户背景", code=403)
+
     user = await UserOperate.get_user_by_uid(uid)
     if not user:
         return api_response(False, "用户不存在", code=404)
@@ -1305,6 +1474,8 @@ async def update_user_background():
         return api_response(False, f"背景配置过长，最多 {MAX_BG_LENGTH} 字符", code=400)
     if len(light_bg_image) > MAX_BG_LENGTH or len(dark_bg_image) > MAX_BG_LENGTH:
         return api_response(False, f"背景图片URL过长", code=400)
+    if not _is_valid_background_url(light_bg_image) or not _is_valid_background_url(dark_bg_image):
+        return api_response(False, "背景图片 URL 格式不合法，仅支持 http(s) 或站内相对路径", code=400)
     
     # 保存到 OTHER 字段
     try:
@@ -1312,7 +1483,7 @@ async def update_user_background():
         if user.OTHER:
             try:
                 other_data = json.loads(user.OTHER)
-            except:
+            except (json.JSONDecodeError, TypeError):
                 other_data = {}
 
         existing_background = other_data.get('background', {}) if isinstance(other_data.get('background', {}), dict) else {}
@@ -1393,7 +1564,7 @@ async def delete_user_background():
         if user.OTHER:
             try:
                 other_data = json.loads(user.OTHER)
-            except:
+            except (json.JSONDecodeError, TypeError):
                 other_data = {}
         
         # 删除背景配置
@@ -1510,8 +1681,12 @@ async def upload_background_image():
 # ==================== 头像管理 ====================
 
 @users_bp.route('/<int:uid>/avatar', methods=['GET'])
+@require_auth
 async def get_user_avatar(uid: int):
     """获取用户头像"""
+    if g.current_user.UID != uid and g.current_user.ROLE != Role.ADMIN.value:
+        return api_response(False, "无权限查看其他用户头像", code=403)
+
     user = await UserOperate.get_user_by_uid(uid)
     if not user:
         return api_response(False, "用户不存在", code=404)
@@ -1624,10 +1799,16 @@ async def delete_avatar():
     
     # 删除头像文件
     try:
-        from src.config import ROOT_PATH
-        file_path = ROOT_PATH / 'webui' / 'public' / user.AVATAR.lstrip('/')
-        if file_path.exists():
-            file_path.unlink()
+        from pathlib import Path
+        from flask import current_app
+
+        avatar_url = (user.AVATAR or '').strip()
+        if avatar_url.startswith('/uploads/avatars/'):
+            upload_root = Path(current_app.config['UPLOAD_FOLDER']).resolve()
+            relative_path = avatar_url.removeprefix('/uploads/')
+            file_path = (upload_root / relative_path).resolve()
+            if str(file_path).startswith(str(upload_root)) and file_path.exists() and file_path.is_file():
+                file_path.unlink()
     except Exception as e:
         logger.warning(f"删除头像文件失败: {e}")
     

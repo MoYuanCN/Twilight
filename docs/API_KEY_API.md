@@ -10,6 +10,8 @@
 
 ## 2. 认证方式
 
+认证头格式与通用响应结构与 [BACKEND_API.md](./BACKEND_API.md) 保持一致；本节仅列 API Key 特有写法。
+
 ### 2.1 Header 方式（推荐）
 
 ```http
@@ -30,27 +32,7 @@ Authorization: ApiKey key-xxxxxxxxxxxxxxxx-yyyyyyyy
 
 ## 3. 通用响应格式
 
-成功响应示例：
-
-```json
-{
-  "success": true,
-  "message": "操作成功",
-  "data": { ... },
-  "timestamp": 1680000000
-}
-```
-
-错误响应示例：
-
-```json
-{
-  "success": false,
-  "message": "错误信息",
-  "data": null,
-  "timestamp": 1680000000
-}
-```
+请直接参考 [BACKEND_API.md](./BACKEND_API.md) 中“认证与请求规范”小节，避免重复维护。
 
 ## 4. 权限与范围
 

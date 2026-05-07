@@ -4,7 +4,6 @@
 /score - 积分查询
 /checkin - 签到（支持群组快捷签到）
 /transfer - 转账
-/ranking - 排行榜
 /sendpack - 发红包
 /grabpack - 抢红包
 """
@@ -95,32 +94,6 @@ def register(bot):
             f"💵 余额: **{balance}** {score_name}\n"
         )
         await safe_edit_message(query.message, text, reply_markup=_score_menu_kb())
-
-    # ======================== 排行榜 ========================
-
-    @require_panel
-    @require_subscribe
-    async def cb_score_ranking(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """积分排行榜"""
-        query = update.callback_query
-        await answer_callback_safe(query)
-
-        ranking = await ScoreService.get_ranking(limit=10)
-        if not ranking:
-            text = "📊 暂无排行数据"
-        else:
-            lines = [f"🏆 **{score_name}排行榜**\n"]
-            medals = ["🥇", "🥈", "🥉"]
-            for i, item in enumerate(ranking):
-                medal = medals[i] if i < 3 else f"{i + 1}."
-                lines.append(f"{medal} `{item['username']}` - **{item['score']}** {score_name}")
-            text = "\n".join(lines)
-
-        kb = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🔄 刷新", callback_data="score_ranking")],
-            [InlineKeyboardButton("🔙 积分中心", callback_data="panel_score")],
-        ])
-        await safe_edit_message(query.message, text, reply_markup=kb)
 
     # ======================== 转账（提示输入） ========================
 
@@ -219,22 +192,6 @@ def register(bot):
     @require_private
     @require_panel
     @require_subscribe
-    async def cmd_ranking(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """积分排行榜"""
-        ranking = await ScoreService.get_ranking(limit=10)
-        if not ranking:
-            await update.message.reply_text("📊 暂无排行数据")
-            return
-        lines = [f"🏆 **{score_name}排行榜**\n"]
-        medals = ["🥇", "🥈", "🥉"]
-        for i, item in enumerate(ranking):
-            medal = medals[i] if i < 3 else f"{i + 1}."
-            lines.append(f"{medal} `{item['username']}` - **{item['score']}** {score_name}")
-        await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
-
-    @require_private
-    @require_panel
-    @require_subscribe
     @require_registered
     async def cmd_sendpack(update: Update, context: ContextTypes.DEFAULT_TYPE, user=None):
         """发红包"""
@@ -296,14 +253,12 @@ def register(bot):
     app.add_handler(CommandHandler("score", cmd_score))
     app.add_handler(CommandHandler("checkin", cmd_checkin))
     app.add_handler(CommandHandler("transfer", cmd_transfer))
-    app.add_handler(CommandHandler("ranking", cmd_ranking))
     app.add_handler(CommandHandler("sendpack", cmd_sendpack))
     app.add_handler(CommandHandler("grabpack", cmd_grabpack))
 
     # 面板回调
     app.add_handler(CallbackQueryHandler(cb_panel_score, pattern="^panel_score$"))
     app.add_handler(CallbackQueryHandler(cb_score_checkin, pattern="^score_checkin$"))
-    app.add_handler(CallbackQueryHandler(cb_score_ranking, pattern="^score_ranking$"))
     app.add_handler(CallbackQueryHandler(cb_score_transfer, pattern="^score_transfer$"))
     app.add_handler(CallbackQueryHandler(cb_score_redpacket, pattern="^score_redpacket$"))
 
@@ -315,10 +270,9 @@ def _score_menu_kb() -> InlineKeyboardMarkup:
     buttons = [
         [
             InlineKeyboardButton("🎯 签到", callback_data="score_checkin"),
-            InlineKeyboardButton("🏆 排行榜", callback_data="score_ranking"),
+            InlineKeyboardButton("💸 转账", callback_data="score_transfer"),
         ],
         [
-            InlineKeyboardButton("💸 转账", callback_data="score_transfer"),
             InlineKeyboardButton("🧧 红包", callback_data="score_redpacket"),
         ],
         [InlineKeyboardButton("♻️ 主菜单", callback_data="back_start")],

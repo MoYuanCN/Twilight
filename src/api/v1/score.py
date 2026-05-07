@@ -195,25 +195,6 @@ async def transfer():
     return api_response(False, message)
 
 
-@score_bp.route('/ranking', methods=['GET'])
-async def get_ranking():
-    """
-    获取积分排行榜
-    
-    Query:
-        limit: int (默认 10，最大 50)
-    """
-    limit = request.args.get('limit', 10, type=int)
-    limit = min(max(limit, 1), 50)
-    
-    ranking = await ScoreService.get_ranking(limit)
-    
-    return api_response(True, "获取成功", {
-        'ranking': ranking,
-        'score_name': ScoreAndRegisterConfig.SCORE_NAME,
-    })
-
-
 @score_bp.route('/config', methods=['GET'])
 async def get_score_config():
     """获取积分配置信息（公开）"""

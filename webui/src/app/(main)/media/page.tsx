@@ -473,20 +473,20 @@ export default function MediaPage() {
                     {searchMode === "name" && (
                       <button 
                         onClick={() => setSource("all")}
-                        className={cn("px-6 rounded-xl font-bold text-sm transition-all", source === "all" ? "bg-primary text-primary-foreground shadow-lg" : "text-muted-foreground hover:bg-slate-950/70 dark:hover:bg-slate-900/90")}
+                        className={cn("px-6 rounded-xl font-bold text-sm transition-all", source === "all" ? "bg-primary text-primary-foreground shadow-lg" : "text-muted-foreground hover:bg-accent")}
                       >
                         全部
                       </button>
                     )}
                     <button 
                       onClick={() => setSource("tmdb")}
-                      className={cn("px-6 rounded-xl font-bold text-sm transition-all", source === "tmdb" ? "bg-primary text-primary-foreground shadow-lg" : "text-muted-foreground hover:bg-slate-950/70 dark:hover:bg-slate-900/90")}
+                      className={cn("px-6 rounded-xl font-bold text-sm transition-all", source === "tmdb" ? "bg-primary text-primary-foreground shadow-lg" : "text-muted-foreground hover:bg-accent")}
                     >
                       TMDB
                     </button>
                     <button 
                       onClick={() => setSource("bangumi")}
-                      className={cn("px-6 rounded-xl font-bold text-sm transition-all", source === "bangumi" ? "bg-primary text-primary-foreground shadow-lg" : "text-muted-foreground hover:bg-slate-950/70 dark:hover:bg-slate-900/90")}
+                      className={cn("px-6 rounded-xl font-bold text-sm transition-all", source === "bangumi" ? "bg-primary text-primary-foreground shadow-lg" : "text-muted-foreground hover:bg-accent")}
                     >
                       Bangumi
                     </button>
@@ -496,13 +496,13 @@ export default function MediaPage() {
                     <div className="flex p-1 bg-white/40 backdrop-blur-md rounded-[1.25rem] border border-white/50 dark:border-slate-700/70 dark:bg-slate-950/30">
                       <button 
                         onClick={() => setMediaType("movie")}
-                        className={cn("px-6 rounded-xl font-bold text-sm transition-all", mediaType === "movie" ? "bg-primary text-primary-foreground shadow-lg" : "text-muted-foreground hover:bg-slate-950/70 dark:hover:bg-slate-900/90")}
+                        className={cn("px-6 rounded-xl font-bold text-sm transition-all", mediaType === "movie" ? "bg-primary text-primary-foreground shadow-lg" : "text-muted-foreground hover:bg-accent")}
                       >
                         电影
                       </button>
                       <button 
                         onClick={() => setMediaType("tv")}
-                        className={cn("px-6 rounded-xl font-bold text-sm transition-all", mediaType === "tv" ? "bg-primary text-primary-foreground shadow-lg" : "text-muted-foreground hover:bg-slate-950/70 dark:hover:bg-slate-900/90")}
+                        className={cn("px-6 rounded-xl font-bold text-sm transition-all", mediaType === "tv" ? "bg-primary text-primary-foreground shadow-lg" : "text-muted-foreground hover:bg-accent")}
                       >
                         剧集
                       </button>
@@ -674,7 +674,7 @@ export default function MediaPage() {
                            <Button 
                              size="icon" 
                              variant="ghost" 
-                             className="h-10 w-10 rounded-xl hover:bg-red-50 hover:text-red-500 transition-colors"
+                             className="h-10 w-10 rounded-xl hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-500/20 dark:hover:text-red-300 transition-colors"
                              onClick={() => handleDelete(req.id)}
                            >
                              <Trash2 className="h-4 w-4" />
@@ -749,7 +749,7 @@ export default function MediaPage() {
               </div>
 
               {/* Right Side: Content */}
-              <div className="flex-1 p-8 overflow-y-auto custom-scrollbar bg-white/95 text-slate-950 dark:bg-white/95 dark:text-slate-950">
+              <div className="flex-1 p-8 overflow-y-auto custom-scrollbar bg-card/95 text-foreground">
                 <div className="space-y-6">
                   {/* Status & Genres */}
                   <div className="flex flex-wrap gap-2">
@@ -757,7 +757,7 @@ export default function MediaPage() {
                       {mediaDetail.media_type === "movie" ? "电影作品" : "电视连续剧"}
                     </Badge>
                     {mediaDetail.genres?.map(genre => (
-                      <Badge key={genre} variant="secondary" className="bg-white/60 border border-white/40 text-muted-foreground font-bold px-3 py-1 rounded-xl">
+                      <Badge key={genre} variant="secondary" className="bg-muted/80 border border-border text-muted-foreground font-bold px-3 py-1 rounded-xl">
                         {genre}
                       </Badge>
                     ))}
@@ -766,7 +766,7 @@ export default function MediaPage() {
                   {/* Overview */}
                   <div className="space-y-2">
                     <p className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground">About</p>
-                    <p className="text-sm leading-relaxed text-slate-950 font-medium">
+                    <p className="text-sm leading-relaxed text-foreground font-medium">
                       {mediaDetail.overview || "暂无简介内容"}
                     </p>
                   </div>
@@ -827,7 +827,7 @@ export default function MediaPage() {
                                   ? "bg-primary text-primary-foreground border-primary shadow-primary/20" 
                                   : isAvailable
                                     ? "bg-emerald-50 border-emerald-100 text-emerald-600 opacity-60 cursor-not-allowed"
-                                    : "bg-white border-white/40 text-muted-foreground hover:bg-slate-950/90 dark:hover:bg-slate-900/90"
+                                    : "bg-background border-border text-muted-foreground hover:bg-accent"
                               )}
                             >
                               Season {s}
@@ -852,7 +852,7 @@ export default function MediaPage() {
                 </div>
 
                 <div className="mt-10 flex gap-3">
-                  <Button variant="outline" className="flex-1 h-12 rounded-2xl font-black border-white/60 bg-white/40 hover:bg-white transition-all shadow-sm" onClick={() => setSelectedMedia(null)}>
+                  <Button variant="outline" className="flex-1 h-12 rounded-2xl font-black border-border bg-background hover:bg-accent transition-all shadow-sm" onClick={() => setSelectedMedia(null)}>
                     关闭
                   </Button>
                   <Button

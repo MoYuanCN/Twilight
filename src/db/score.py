@@ -66,6 +66,16 @@ class ScoreOperate:
             return scalar.scalar_one_or_none()
 
     @staticmethod
+    async def get_scores_by_uids(uids: List[int]) -> dict[int, ScoreModel]:
+        """批量获取积分记录，返回 {uid: ScoreModel}。"""
+        if not uids:
+            return {}
+        async with ScoreSessionFactory() as session:
+            result = await session.execute(select(ScoreModel).where(ScoreModel.UID.in_(uids)))
+            rows = list(result.scalars().all())
+            return {row.UID: row for row in rows}
+
+    @staticmethod
     async def get_score_by_telegram_id(telegram_id: int) -> Optional[ScoreModel]:
         """根据Telegram ID获取积分记录"""
         async with ScoreSessionFactory() as session:

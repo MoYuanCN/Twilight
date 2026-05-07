@@ -1,16 +1,98 @@
 "use client";
 
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { useState } from "react";
 import { useAuthStore } from "@/store/auth";
 import { Badge } from "@/components/ui/badge";
-import { Sparkles } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { cn } from "@/lib/utils";
+import { adminNavItems, userNavItems } from "@/components/layout/sidebar";
+import { Menu, Sparkles } from "lucide-react";
 
 export function Header() {
-  const { user } = useAuthStore();
+  const pathname = usePathname();
+  const { user, logout } = useAuthStore();
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const isAdmin = user?.role === 0;
 
   return (
     <header className="sticky top-0 z-30 px-4 pt-4 md:px-6 md:pt-6 xl:px-8">
       <div className="header-surface">
         <div className="flex min-w-0 items-center gap-4">
+          <Dialog open={mobileOpen} onOpenChange={setMobileOpen}>
+            <DialogTrigger asChild>
+              <Button variant="outline" size="icon" className="lg:hidden">
+                <Menu className="h-5 w-5" />
+                <span className="sr-only">打开菜单</span>
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="left-auto right-0 top-0 h-dvh w-[85vw] max-w-sm translate-x-0 translate-y-0 rounded-none border-l p-5 sm:max-w-sm">
+              <DialogHeader>
+                <DialogTitle>导航菜单</DialogTitle>
+                <DialogDescription>快速切换页面</DialogDescription>
+              </DialogHeader>
+
+              <nav className="mt-2 space-y-2">
+                <p className="px-2 text-xs uppercase tracking-[0.14em] text-muted-foreground">用户菜单</p>
+                {userNavItems.map((item) => {
+                  const active = pathname === item.href;
+                  return (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      onClick={() => setMobileOpen(false)}
+                      className={cn(
+                        "flex items-center gap-2 rounded-lg px-3 py-3 text-sm",
+                        active ? "bg-primary/12 text-primary" : "hover:bg-muted"
+                      )}
+                    >
+                      <item.icon className="h-4 w-4" />
+                      <span>{item.label}</span>
+                    </Link>
+                  );
+                })}
+
+                {isAdmin && (
+                  <>
+                    <p className="px-2 pt-2 text-xs uppercase tracking-[0.14em] text-muted-foreground">管理菜单</p>
+                    {adminNavItems.map((item) => {
+                      const active = pathname.startsWith(item.href);
+                      return (
+                        <Link
+                          key={item.href}
+                          href={item.href}
+                          onClick={() => setMobileOpen(false)}
+                          className={cn(
+                            "flex items-center gap-2 rounded-lg px-3 py-3 text-sm",
+                            active ? "bg-primary/12 text-primary" : "hover:bg-muted"
+                          )}
+                        >
+                          <item.icon className="h-4 w-4" />
+                          <span>{item.label}</span>
+                        </Link>
+                      );
+                    })}
+                  </>
+                )}
+              </nav>
+
+              <div className="mt-4 border-t pt-4">
+                <Button
+                  variant="outline"
+                  className="h-11 w-full"
+                  onClick={() => {
+                    setMobileOpen(false);
+                    logout();
+                  }}
+                >
+                  退出登录
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
+
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-primary/15 text-primary">
             <Sparkles className="h-5 w-5" />
           </div>

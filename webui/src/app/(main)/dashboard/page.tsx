@@ -6,8 +6,6 @@ import {
   Coins,
   Calendar,
   Clock,
-  Play,
-  Tv,
   Flame,
   Gift,
   CheckCircle2,
@@ -38,8 +36,8 @@ import { useAsyncResource } from "@/hooks/use-async-resource";
 import { useRegionRefresh } from "@/hooks/use-region-refresh";
 import { PageError } from "@/components/layout/page-state";
 import { useAuthStore } from "@/store/auth";
-import { api, type ScoreInfo, type PlaybackStats, type TopMediaItem } from "@/lib/api";
-import { formatRelativeTime, formatNumber, cn } from "@/lib/utils";
+import { api, type ScoreInfo } from "@/lib/api";
+import { formatNumber, cn } from "@/lib/utils";
 import { RegionRefreshKeys } from "@/lib/region-refresh";
 
 const container = {
@@ -61,11 +59,9 @@ export default function DashboardPage() {
   const { user, fetchUser } = useAuthStore();
   const { toast } = useToast();
   const [scoreInfo, setScoreInfo] = useState<ScoreInfo | null>(null);
-  const [stats, setStats] = useState<PlaybackStats | null>(null);
   const [isCheckinLoading, setIsCheckinLoading] = useState(false);
   const [regCode, setRegCode] = useState("");
   const [isRenewing, setIsRenewing] = useState(false);
-  const [topMedia, setTopMedia] = useState<TopMediaItem[]>([]); // kept for future use
   const [regCodeInfo, setRegCodeInfo] = useState<{ type: number; type_name: string; days: number } | null>(null);
   const [showConfirm, setShowConfirm] = useState(false);
   
@@ -75,16 +71,10 @@ export default function DashboardPage() {
   const [isEditingScore, setIsEditingScore] = useState(false);
 
   const loadDashboardData = useCallback(async () => {
-    const [scoreRes, statsRes] = await Promise.all([
-      api.getScoreInfo(),
-      api.getMyStats().catch(() => ({ success: false, data: null })),
-    ]);
+    const scoreRes = await api.getScoreInfo();
 
     if (scoreRes.success && scoreRes.data) {
       setScoreInfo(scoreRes.data);
-    }
-    if (statsRes.success && statsRes.data) {
-      setStats(statsRes.data);
     }
 
     return true;
@@ -289,10 +279,11 @@ export default function DashboardPage() {
   }
   
   const isAdmin = user?.role === 0;
+  const isUnregistered = !user?.emby_id && !user?.active && !isAdmin;
   const isExpired = !isAdmin && expiredTimestamp !== null && expiredTimestamp !== -1 && expiredTimestamp < Date.now();
-  const isPermanent = isAdmin || !expiredTimestamp || expiredTimestamp === -1;
+  const isPermanent = isAdmin || (!expiredTimestamp && !isUnregistered) || expiredTimestamp === -1;
   
-  const daysLeft = (!isPending && !isPermanent && expiredTimestamp)
+  const daysLeft = (!isPending && !isPermanent && !isUnregistered && expiredTimestamp)
     ? Math.max(0, Math.ceil((expiredTimestamp - Date.now()) / (1000 * 60 * 60 * 24)))
     : 0;
 
@@ -325,7 +316,7 @@ export default function DashboardPage() {
             {getGreeting()}，{user?.username}
           </h1>
           <p className="text-muted-foreground font-medium mt-1">
-            {isPending ? "激活账号，开启您的星光之旅" : "发现新鲜事，品味好作品"}
+            {isPending ? "完成激活后即可开始使用全部功能" : "欢迎回来，当前账号状态正常"}
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -369,7 +360,7 @@ export default function DashboardPage() {
             <div className="mt-6">
               <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">到期倒计时</p>
               <h3 className="text-3xl font-black mt-1">
-                {isPermanent ? "∞ 永恒" : `${daysLeft} 天`}
+                {isUnregistered ? "尚未注册" : isPermanent ? "∞ 永恒" : `${daysLeft} 天`}
               </h3>
             </div>
           </div>
@@ -395,18 +386,18 @@ export default function DashboardPage() {
               <Clock className="h-5 w-5" />
             </div>
             <div className="mt-6">
-              <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">累计观影</p>
+              <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">账号状态</p>
               <h3 className="text-3xl font-black mt-1">
-                {isLoading ? <Skeleton className="h-8 w-24" /> : `${Math.floor((stats?.total_time || 0) / 60)} HR`}
+                {isPending ? "待激活" : isExpired ? "已过期" : "正常"}
               </h3>
             </div>
           </div>
         </motion.div>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-3">
+      <div className="grid gap-6">
         {/* Main Interaction Area */}
-        <motion.div variants={item} className="lg:col-span-2 space-y-6">
+        <motion.div variants={item} className="space-y-6">
           {/* Checkin / Welcome Card */}
           <div className="premium-card p-1 shadow-2xl">
             <div className="glass-liquid p-8 rounded-[1.75rem] flex flex-col md:flex-row items-center gap-8 border-0 overflow-hidden relative">
@@ -482,43 +473,12 @@ export default function DashboardPage() {
                 </Button>
               </div>
               <p className="mt-4 text-[11px] text-center text-muted-foreground font-bold">
-                没有授权码？请联系管理员或在群组获取
+                请输入有效授权码后继续
               </p>
             </div>
 
 
           </div>
-        </motion.div>
-
-        {/* Sidebar Widgets */}
-        <motion.div variants={item} className="space-y-6">
-
-           {/* Recent Activity */}
-           <div className="premium-card p-6">
-              <h3 className="text-lg font-black tracking-tight mb-6 flex items-center gap-2">
-                <Play className="h-5 w-5 text-primary" />
-                最近观看历史
-              </h3>
-              <div className="space-y-5">
-                {stats?.recent_items && stats.recent_items.length > 0 ? (
-                  stats.recent_items.slice(0, 4).map((item, idx) => (
-                    <div key={idx} className="flex items-center gap-3 group">
-                       <div className="h-10 w-10 shrink-0 flex items-center justify-center rounded-2xl bg-primary/5 text-primary group-hover:bg-primary group-hover:text-white transition-all shadow-inner">
-                         <Tv className="h-4 w-4" />
-                       </div>
-                       <div className="min-w-0">
-                         <p className="text-sm font-black truncate group-hover:text-primary transition-colors">{item.name}</p>
-                         <p className="text-[9px] font-black text-muted-foreground uppercase opacity-60">
-                           {formatRelativeTime(new Date(item.played_at).getTime())}
-                         </p>
-                       </div>
-                    </div>
-                  ))
-                ) : (
-                  <p className="text-xs text-muted-foreground italic text-center py-4">暂无播放记录</p>
-                )}
-              </div>
-           </div>
         </motion.div>
       </div>
 

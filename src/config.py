@@ -337,31 +337,6 @@ class DeviceLimitConfig(BaseConfig):
     KICK_OLDEST_SESSION: bool = False  # 超限时是否踢掉最早的会话
 
 
-class WebhookConfig(BaseConfig):
-    """Webhook 配置管理类"""
-    WEBHOOK_ENABLED: bool = False  # 是否启用 Webhook
-    WEBHOOK_SECRET: str = ''  # Webhook 验证密钥
-    WEBHOOK_ENDPOINTS: List[str] = []  # 外部推送端点列表
-    # 播放统计
-    PLAYBACK_STATS_ENABLED: bool = False  # 是否启用播放统计
-    # 排行榜
-    RANKING_ENABLED: bool = True  # 是否启用排行榜
-    RANKING_PUBLIC: bool = True  # 排行榜是否公开（不需要登录）
-
-
-class EmbyReviewConfig(BaseConfig):
-    """Emby 账号审查配置"""
-    ENABLED: bool = False  # 是否启用 Emby 审查任务
-    REVIEW_TIME: str = "04:00"  # 审查任务执行时间
-    INACTIVE_THRESHOLD_DAYS: int = 21  # 多久没有播放记录则视为不活跃
-    INACTIVE_ACTION: str = "disable"  # 不活跃账号的处理方式 disable/delete
-    INACTIVE_DELETE_EMBY: bool = False  # 删除账号时是否同时删除 Emby 用户
-    DEVICE_REVIEW_ENABLED: bool = False  # 是否启用设备使用审查
-    DEVICE_THRESHOLD_DAYS: int = 30  # 统计设备数量的时间窗口（天）
-    DEVICE_MAX_COUNT: int = 5  # 允许的最大设备数量
-    DEVICE_ACTION: str = "kick_oldest"  # 超限时的处理方式 kick_oldest/block_oldest
-
-
 class APIConfig(BaseConfig):
     """API 服务器配置"""
     HOST: str = "0.0.0.0"
@@ -421,21 +396,18 @@ if isinstance(EmbyConfig.EMBY_NSFW, str):
     EmbyConfig.EMBY_NSFW = [n.strip() for n in EmbyConfig.EMBY_NSFW.split(',') if n.strip()] if EmbyConfig.EMBY_NSFW.strip() else []
 TelegramConfig.update_from_toml('Telegram')
 ScoreAndRegisterConfig.update_from_toml('SAR')
-WebhookConfig.update_from_toml('Webhook')
 DeviceLimitConfig.update_from_toml('DeviceLimit')
 APIConfig.update_from_toml('API')
 SecurityConfig.update_from_toml('Security')
 SchedulerConfig.update_from_toml('Scheduler')
 NotificationConfig.update_from_toml('Notification')
 BangumiSyncConfig.update_from_toml('BangumiSync')
-EmbyReviewConfig.update_from_toml('EmbyReview')
 
 # 启动时自动补全缺失的配置项
 _config_classes = [
     Config, EmbyConfig, TelegramConfig, ScoreAndRegisterConfig,
-    WebhookConfig, DeviceLimitConfig, APIConfig, SecurityConfig,
+    DeviceLimitConfig, APIConfig, SecurityConfig,
     SchedulerConfig, NotificationConfig, BangumiSyncConfig,
-    EmbyReviewConfig,
 ]
 _filled = sum(1 for c in _config_classes if c.fill_missing_to_toml())
 if _filled:

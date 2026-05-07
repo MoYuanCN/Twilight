@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import type { ComponentType } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { motion } from "framer-motion";
@@ -30,14 +31,20 @@ import { useRegionRefresh } from "@/hooks/use-region-refresh";
 import { RegionRefreshKeys } from "@/lib/region-refresh";
 import { useSystemStore } from "@/store/system";
 
-const userNavItems = [
+export interface SidebarNavItem {
+  href: string;
+  label: string;
+  icon: ComponentType<{ className?: string }>;
+}
+
+export const userNavItems: SidebarNavItem[] = [
   { href: "/dashboard", label: "仪表盘", icon: LayoutDashboard },
   { href: "/media", label: "求片中心", icon: Film },
   { href: "/score", label: "积分中心", icon: Coins },
   { href: "/settings", label: "个人设置", icon: Settings },
 ];
 
-const adminNavItems = [
+export const adminNavItems: SidebarNavItem[] = [
   { href: "/admin/users", label: "用户管理", icon: Users },
   { href: "/admin/regcodes", label: "注册码", icon: FileText },
   { href: "/admin/requests", label: "求片审核", icon: Film },

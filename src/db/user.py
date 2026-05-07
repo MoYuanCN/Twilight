@@ -1,4 +1,5 @@
 from enum import Enum
+import json
 import random
 import time
 import hashlib
@@ -178,6 +179,23 @@ class UserOperate:
             return scalar.scalar_one_or_none()
 
     @staticmethod
+    async def get_users_by_telegram_ids(telegram_ids: list[int]) -> dict[int, UserModel]:
+        """批量根据 Telegram ID 获取用户，返回 {telegram_id: user}。"""
+        if not telegram_ids:
+            return {}
+
+        unique_ids = list(dict.fromkeys(tid for tid in telegram_ids if tid is not None))
+        if not unique_ids:
+            return {}
+
+        async with UsersSessionFactory() as session:
+            result = await session.execute(
+                select(UserModel).where(UserModel.TELEGRAM_ID.in_(unique_ids))
+            )
+            users = list(result.scalars().all())
+            return {u.TELEGRAM_ID: u for u in users if u.TELEGRAM_ID is not None}
+
+    @staticmethod
     async def get_user_by_username(username: str) -> Optional[UserModel]:
         """根据Emby用户名获取用户"""
         async with UsersSessionFactory() as session:
@@ -205,8 +223,28 @@ class UserOperate:
     
     @staticmethod
     async def get_user_by_emby_username(username: str) -> Optional[UserModel]:
-        """根据 Emby/Jellyfin 用户名获取用户（与 get_user_by_username 相同）"""
-        return await UserOperate.get_user_by_username(username)
+        """根据 Emby/Jellyfin 用户名查找用户，兼容单独存储的 Emby 用户名"""
+        async with UsersSessionFactory() as session:
+            scalar = await session.execute(select(UserModel).filter_by(USERNAME=username).limit(1))
+            user = scalar.scalar_one_or_none()
+            if user:
+                return user
+
+            # 兼容旧数据：OTHER 字段可能存储了 embay_username
+            result = await session.execute(
+                select(UserModel).where(UserModel.OTHER.isnot(None), UserModel.OTHER != '')
+            )
+            for candidate in result.scalars().all():
+                if not candidate.OTHER:
+                    continue
+                try:
+                    other = json.loads(candidate.OTHER)
+                except (json.JSONDecodeError, TypeError):
+                    continue
+                embay_username = other.get('emby_username')
+                if isinstance(embay_username, str) and embay_username.lower() == username.lower():
+                    return candidate
+            return None
 
     @staticmethod
     async def update_user(user: UserModel) -> None:
@@ -405,6 +443,7 @@ class UserOperate:
     async def get_all_users(
         include_inactive: bool = False,
         role: Optional[int] = None,
+        search: Optional[str] = None,
         limit: int = 100,
         offset: int = 0
     ) -> tuple[list[UserModel], int]:
@@ -420,6 +459,8 @@ class UserOperate:
                 conditions.append(UserModel.ACTIVE_STATUS == True)
             if role is not None:
                 conditions.append(UserModel.ROLE == role)
+            if search:
+                conditions.append(UserModel.USERNAME.ilike(f"%{search}%"))
             
             # 查询总数
             count_query = select(func.count()).select_from(UserModel)

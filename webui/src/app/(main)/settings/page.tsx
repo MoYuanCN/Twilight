@@ -794,7 +794,7 @@ export default function SettingsPage() {
                   return (
                     <div
                       key={key}
-                      className="group relative h-full rounded-xl border bg-card p-4 transition-colors hover:bg-accent/50 dark:border-slate-700/70 dark:bg-slate-950/60 dark:hover:bg-slate-900/80"
+                      className="group relative h-full rounded-xl border border-border bg-card p-4 transition-colors hover:bg-accent/50"
                     >
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0 flex-1">
@@ -1004,17 +1004,6 @@ export default function SettingsPage() {
             )}
 
             <Separator />
-
-            {/* Device Limit Info */}
-            {settings?.system_config.device_limit_enabled && (
-              <div className="rounded-lg bg-accent/50 p-4">
-                <p className="font-medium">设备限制</p>
-                <p className="text-sm text-muted-foreground">
-                  最多 {settings.system_config.max_devices} 台设备，
-                  同时 {settings.system_config.max_streams} 路播放
-                </p>
-              </div>
-            )}
           </CardContent>
         </Card>
       </motion.div>

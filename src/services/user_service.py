@@ -4,6 +4,7 @@
 处理用户注册、续期、绑定等业务逻辑
 """
 import time
+import json
 import logging
 from typing import List, Optional, Tuple
 from dataclasses import dataclass
@@ -281,6 +282,55 @@ class UserService:
             await release_registration_lock(locks)
 
     @staticmethod
+    async def register_direct_emby(
+        telegram_id: Optional[int],
+        username: str,
+        email: Optional[str] = None,
+        password: Optional[str] = None,
+    ) -> RegisterResponse:
+        """直接创建 Emby 账号（用于 Emby 自由注册队列）。"""
+        if not ScoreAndRegisterConfig.EMBY_DIRECT_REGISTER_ENABLED:
+            return RegisterResponse(RegisterResult.ERROR, "Emby 自由注册未开启")
+
+        if not telegram_id:
+            return RegisterResponse(RegisterResult.TELEGRAM_NOT_BOUND, "请先完成 Telegram 绑定")
+
+        locks = await acquire_registration_lock(username, telegram_id)
+        if locks is None:
+            return RegisterResponse(RegisterResult.ERROR, "当前注册请求较多，请稍后重试")
+
+        global_lock = await acquire_global_registration_lock()
+        if global_lock is None:
+            await release_registration_lock(locks)
+            return RegisterResponse(RegisterResult.ERROR, "当前注册请求较多，请稍后重试")
+
+        try:
+            available, msg = await UserService.check_registration_available(use_cache=False)
+            if not available:
+                return RegisterResponse(RegisterResult.USER_LIMIT_REACHED, msg)
+
+            existing_tg = await UserOperate.get_user_by_telegram_id(telegram_id)
+            if existing_tg and existing_tg.EMBYID:
+                return RegisterResponse(RegisterResult.USER_EXISTS, "该 Telegram 账号已绑定 Emby 账户")
+
+            existing_name = await UserOperate.get_user_by_username(username)
+            if existing_name and existing_name.EMBYID:
+                return RegisterResponse(RegisterResult.USER_EXISTS, "该用户名已被占用")
+            if existing_name and existing_name.TELEGRAM_ID and existing_name.TELEGRAM_ID != telegram_id:
+                return RegisterResponse(RegisterResult.USER_EXISTS, "该用户名已被占用")
+
+            return await UserService._create_emby_user(
+                telegram_id=telegram_id,
+                username=username,
+                email=email,
+                days=max(int(ScoreAndRegisterConfig.EMBY_DIRECT_REGISTER_DAYS or 30), 1),
+                password=password,
+            )
+        finally:
+            await release_global_registration_lock(global_lock)
+            await release_registration_lock(locks)
+
+    @staticmethod
     async def register_pending(
         telegram_id: Optional[int],
         username: str,
@@ -525,7 +575,6 @@ class UserService:
                 existing_user = await UserOperate.get_user_by_telegram_id(telegram_id)
             
             if existing_user:
-                existing_user.USERNAME = username
                 existing_user.EMBYID = emby_user.id
                 existing_user.PASSWORD = hash_password(user_password)
                 # 如果是管理员或白名单，保持永久有效期
@@ -538,6 +587,15 @@ class UserService:
                     existing_user.ROLE = Role.NORMAL.value
                 existing_user.EMAIL = email
                 existing_user.REGISTER_TIME = timestamp()
+                import json
+                other_data = {}
+                if existing_user.OTHER:
+                    try:
+                        other_data = json.loads(existing_user.OTHER)
+                    except (json.JSONDecodeError, TypeError):
+                        other_data = {}
+                other_data['emby_username'] = username
+                existing_user.OTHER = json.dumps(other_data)
                 await UserOperate.update_user(existing_user)
                 user = existing_user
             else:
@@ -591,6 +649,7 @@ class UserService:
                     ROLE=user_role,
                     EXPIRED_AT=user_expire,
                     REGISTER_TIME=timestamp(),
+                    OTHER=json.dumps({'emby_username': username}),
                 )
                 await UserOperate.add_user(user)
             
@@ -1145,6 +1204,17 @@ class UserService:
         }
         role_name = role_name_map.get(user.ROLE, "未知")
         
+        embay_username = None
+        if user.OTHER:
+            try:
+                other_data = json.loads(user.OTHER)
+                embay_username = other_data.get('emby_username')
+            except (json.JSONDecodeError, TypeError):
+                embay_username = None
+
+        if not embay_username and user.EMBYID:
+            embay_username = user.USERNAME
+
         info = {
             "uid": user.UID,
             "username": user.USERNAME,
@@ -1163,6 +1233,7 @@ class UserService:
             "register_time": user.REGISTER_TIME,
             "created_at": user.REGISTER_TIME,  # 前端兼容字段
             "emby_id": user.EMBYID,  # 添加 Emby ID
+            "emby_username": embay_username,
         }
         
         # 获取积分
@@ -1204,6 +1275,15 @@ class UserService:
             # 更新本地用户名
             old_username = user.USERNAME
             user.USERNAME = new_username
+            import json
+            other_data = {}
+            if user.OTHER:
+                try:
+                    other_data = json.loads(user.OTHER)
+                except (json.JSONDecodeError, TypeError):
+                    other_data = {}
+            other_data['emby_username'] = new_username
+            user.OTHER = json.dumps(other_data)
             await UserOperate.update_user(user)
             
             logger.info(f"用户名已修改: {old_username} -> {new_username}")

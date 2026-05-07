@@ -12,7 +12,6 @@ from src.api.v1.emby import emby_bp
 from src.api.v1.admin import admin_bp
 from src.api.v1.media import media_bp
 from src.api.v1.stats import stats_bp
-from src.api.v1.webhook import webhook_bp
 from src.api.v1.security import security_bp
 from src.api.v1.batch import batch_bp
 from src.api.v1.system import system_bp
@@ -35,7 +34,6 @@ def register_v1_blueprints(app):
     app.register_blueprint(admin_bp, url_prefix='/api/v1/admin')
     app.register_blueprint(media_bp, url_prefix='/api/v1/media')
     app.register_blueprint(stats_bp, url_prefix='/api/v1/stats')
-    app.register_blueprint(webhook_bp, url_prefix='/api/v1/webhook')
     app.register_blueprint(security_bp, url_prefix='/api/v1/security')
     app.register_blueprint(batch_bp, url_prefix='/api/v1/batch')
     app.register_blueprint(system_bp, url_prefix='/api/v1/system')
@@ -52,7 +50,6 @@ __all__ = [
     'admin_bp',
     'media_bp',
     'stats_bp',
-    'webhook_bp',
     'security_bp',
     'batch_bp',
     'system_bp',

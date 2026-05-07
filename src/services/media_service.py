@@ -731,7 +731,13 @@ class MediaRequestService:
                 ReqStatus.DOWNLOADING: "正在下载中",
             }.get(status, "未知状态")
             season_str = f" 第 {season} 季" if season else ""
-            return False, f"该媒体{season_str}已被请求过（{status_msg}）", existing.id
+            active_statuses = {
+                ReqStatus.UNHANDLED,
+                ReqStatus.ACCEPTED,
+                ReqStatus.DOWNLOADING,
+            }
+            if status in active_statuses:
+                return False, f"该媒体{season_str}已被请求过（{status_msg}）", existing.id
 
         # 检查当前用户的并发求片数量
         from src.config import ScoreAndRegisterConfig
@@ -868,10 +874,12 @@ class MediaRequestService:
         
         requests = await BangumiRequireOperate.get_all_pending_list()
         
+        telegram_ids = [req.telegram_id for req in requests if req.telegram_id is not None]
+        users_map = await UserOperate.get_users_by_telegram_ids(telegram_ids)
+
         results = []
         for req in requests:
-            # 获取用户信息
-            user = await UserOperate.get_user_by_telegram_id(req.telegram_id)
+            user = users_map.get(req.telegram_id)
             
             # 安全解析 other_info
             media_info = None
@@ -909,7 +917,8 @@ class MediaRequestService:
                     'username': user.USERNAME if user else None,
                 } if user else None,
             })
-        
+
+        results.sort(key=lambda item: (item.get('timestamp') or 0, item.get('id') or 0), reverse=True)
         return results
     
     @staticmethod

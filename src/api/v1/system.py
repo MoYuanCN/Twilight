@@ -8,10 +8,10 @@ from sqlalchemy import text
 
 from src.api.v1.auth import require_auth, require_admin, api_response
 from src.config import (
-    Config, EmbyConfig, ScoreAndRegisterConfig, WebhookConfig,
+    Config, EmbyConfig, ScoreAndRegisterConfig,
     DeviceLimitConfig, APIConfig, SecurityConfig,
     SchedulerConfig, NotificationConfig, TelegramConfig,
-    BangumiSyncConfig, EmbyReviewConfig
+    BangumiSyncConfig
 )
 from src import __version__
 from src.db.user import UsersSessionFactory
@@ -94,7 +94,6 @@ async def get_system_info():
             'register': ScoreAndRegisterConfig.REGISTER_MODE,
             'score_register': ScoreAndRegisterConfig.SCORE_REGISTER_MODE,
             'telegram': Config.TELEGRAM_MODE,
-            'webhook': WebhookConfig.WEBHOOK_ENABLED,
             'red_packet': ScoreAndRegisterConfig.RED_PACKET_MODE,
             'transfer': ScoreAndRegisterConfig.PRIVATE_TRANSFER_MODE,
             'auto_renew': ScoreAndRegisterConfig.AUTO_RENEW_ENABLED,
@@ -103,7 +102,6 @@ async def get_system_info():
         },
         'limits': {
             'user_limit': ScoreAndRegisterConfig.USER_LIMIT,
-            'device_limit': DeviceLimitConfig.MAX_DEVICES if DeviceLimitConfig.DEVICE_LIMIT_ENABLED else None,
             'stream_limit': DeviceLimitConfig.MAX_STREAMS if DeviceLimitConfig.DEVICE_LIMIT_ENABLED else None,
         },
         'score': {
@@ -313,13 +311,6 @@ async def get_admin_config():
             'max_streams': DeviceLimitConfig.MAX_STREAMS,
             'kick_oldest': DeviceLimitConfig.KICK_OLDEST_SESSION,
         },
-        'webhook': {
-            'enabled': WebhookConfig.WEBHOOK_ENABLED,
-            'has_secret': bool(WebhookConfig.WEBHOOK_SECRET),
-            'endpoints_count': len(WebhookConfig.WEBHOOK_ENDPOINTS),
-            'playback_stats': WebhookConfig.PLAYBACK_STATS_ENABLED,
-            'ranking_enabled': WebhookConfig.RANKING_ENABLED,
-        },
         'security': {
             'ip_limit': SecurityConfig.IP_LIMIT_ENABLED,
             'max_ips': SecurityConfig.MAX_IPS_PER_USER,
@@ -448,7 +439,7 @@ async def update_config_toml():
         
         # 重新加载配置
         from src.config import (
-            Config, EmbyConfig, ScoreAndRegisterConfig, WebhookConfig,
+            Config, EmbyConfig, ScoreAndRegisterConfig,
             DeviceLimitConfig, APIConfig, SecurityConfig,
             SchedulerConfig, NotificationConfig, TelegramConfig,
             BangumiSyncConfig
@@ -457,7 +448,6 @@ async def update_config_toml():
         EmbyConfig.update_from_toml('Emby')
         TelegramConfig.update_from_toml('Telegram')
         ScoreAndRegisterConfig.update_from_toml('SAR')
-        WebhookConfig.update_from_toml('Webhook')
         DeviceLimitConfig.update_from_toml('DeviceLimit')
         APIConfig.update_from_toml('API')
         SecurityConfig.update_from_toml('Security')
@@ -611,41 +601,6 @@ async def get_config_schema():
                 ],
             },
             {
-                'key': 'EmbyReview',
-                'title': 'Emby 审查',
-                'description': '自动审查长时间未播放与设备使用情况',
-                'fields': [
-                    {'key': 'enabled', 'label': '启用 Emby 审查', 'type': 'bool', 'description': '是否自动执行 Emby 帐号审查任务', 'value': EmbyReviewConfig.ENABLED},
-                    {'key': 'review_time', 'label': '审查时间', 'type': 'string', 'description': '每天执行 Emby 审查任务的时间 (HH:MM)', 'value': EmbyReviewConfig.REVIEW_TIME},
-                    {'key': 'inactive_threshold_days', 'label': '不活跃阈值 (天)', 'type': 'int', 'description': '多少天没有播放记录则视为不活跃', 'value': EmbyReviewConfig.INACTIVE_THRESHOLD_DAYS},
-                    {'key': 'inactive_action', 'label': '不活跃处理方式', 'type': 'select', 'description': '不活跃用户达到阈值后的处理方式', 'value': EmbyReviewConfig.INACTIVE_ACTION, 'options': [
-                        {'label': '禁用账户', 'value': 'disable'},
-                        {'label': '删除账户', 'value': 'delete'},
-                    ]},
-                    {'key': 'inactive_delete_emby', 'label': '删除时同步删除 Emby 账号', 'type': 'bool', 'description': '选择删除账户时是否同时删除 Emby 中对应用户', 'value': EmbyReviewConfig.INACTIVE_DELETE_EMBY},
-                    {'key': 'device_review_enabled', 'label': '启用设备审查', 'type': 'bool', 'description': '是否审查设备数量过多的用户', 'value': EmbyReviewConfig.DEVICE_REVIEW_ENABLED},
-                    {'key': 'device_threshold_days', 'label': '设备审查时间窗口 (天)', 'type': 'int', 'description': '统计最近多少天的设备使用情况', 'value': EmbyReviewConfig.DEVICE_THRESHOLD_DAYS},
-                    {'key': 'device_max_count', 'label': '设备数量上限', 'type': 'int', 'description': '超过该设备数量后触发审查', 'value': EmbyReviewConfig.DEVICE_MAX_COUNT},
-                    {'key': 'device_action', 'label': '设备超限处理', 'type': 'select', 'description': '超过设备数量时的处理方式', 'value': EmbyReviewConfig.DEVICE_ACTION, 'options': [
-                        {'label': '踢出最早会话', 'value': 'kick_oldest'},
-                        {'label': '封禁最早设备', 'value': 'block_oldest'},
-                    ]},
-                ],
-            },
-            {
-                'key': 'Webhook',
-                'title': 'Webhook 配置',
-                'description': 'Webhook 推送和播放统计',
-                'fields': [
-                    {'key': 'webhook_enabled', 'label': '启用 Webhook', 'type': 'bool', 'description': '是否启用 Webhook 功能', 'value': WebhookConfig.WEBHOOK_ENABLED},
-                    {'key': 'webhook_secret', 'label': 'Webhook 密钥', 'type': 'secret', 'description': 'Webhook 请求验证密钥', 'value': WebhookConfig.WEBHOOK_SECRET},
-                    {'key': 'webhook_endpoints', 'label': '推送端点', 'type': 'list', 'description': '外部 Webhook 推送 URL 列表', 'value': WebhookConfig.WEBHOOK_ENDPOINTS},
-                    {'key': 'playback_stats_enabled', 'label': '播放统计', 'type': 'bool', 'description': '是否启用播放统计功能', 'value': WebhookConfig.PLAYBACK_STATS_ENABLED},
-                    {'key': 'ranking_enabled', 'label': '排行榜', 'type': 'bool', 'description': '是否启用排行榜功能', 'value': WebhookConfig.RANKING_ENABLED},
-                    {'key': 'ranking_public', 'label': '公开排行榜', 'type': 'bool', 'description': '排行榜是否对未登录用户公开', 'value': WebhookConfig.RANKING_PUBLIC},
-                ],
-            },
-            {
                 'key': 'API',
                 'title': 'API 服务器',
                 'description': 'Web API 服务器配置',
@@ -764,14 +719,12 @@ async def update_config_by_schema():
         EmbyConfig.update_from_toml('Emby')
         TelegramConfig.update_from_toml('Telegram')
         ScoreAndRegisterConfig.update_from_toml('SAR')
-        WebhookConfig.update_from_toml('Webhook')
         DeviceLimitConfig.update_from_toml('DeviceLimit')
         APIConfig.update_from_toml('API')
         SecurityConfig.update_from_toml('Security')
         SchedulerConfig.update_from_toml('Scheduler')
         NotificationConfig.update_from_toml('Notification')
         BangumiSyncConfig.update_from_toml('BangumiSync')
-        EmbyReviewConfig.update_from_toml('EmbyReview')
         
         # 热重载服务
         _hot_reload_services()

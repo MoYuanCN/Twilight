@@ -157,7 +157,12 @@ nano .env  # 编辑配置
 
 # 测试运行
 python main.py api
+
+# 一键开发启动（后端+前端）
+bash ./start_all.sh
 ```
+
+> 若 `start_all.sh` 无执行权限，请先运行 `chmod +x ./start_all.sh`。
 
 ### 配置为系统服务
 
@@ -325,6 +330,8 @@ server {
 通过 Nginx 统一域名后，前端 `NEXT_PUBLIC_API_URL` 可设置为同域地址（如 `http://your-domain.com`），不再需要跨域配置。
 
 ## 配置说明
+
+推荐优先使用相对路径配置（如 `databases_dir = "db"`），避免跨平台迁移时路径失效。
 
 ### config.toml
 

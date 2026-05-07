@@ -1,7 +1,7 @@
 """
 通知服务
 
-支持多渠道通知推送（Telegram、Webhook 等）
+支持 Telegram 等通知渠道
 参考: https://github.com/berry8838/Sakura_embyboss
 """
 import logging
@@ -9,8 +9,7 @@ from typing import Optional, List, Dict, Any
 from dataclasses import dataclass
 from enum import Enum
 
-from src.config import Config, TelegramConfig, WebhookConfig
-from src.services.webhook import WebhookPushService
+from src.config import Config, TelegramConfig
 
 logger = logging.getLogger(__name__)
 
@@ -26,10 +25,6 @@ class NotificationType(Enum):
     # 播放相关
     PLAYBACK_START = 'playback.start'
     PLAYBACK_STOP = 'playback.stop'
-    
-    # 排行榜
-    DAILY_RANKING = 'ranking.daily'
-    WEEKLY_RANKING = 'ranking.weekly'
     
     # 媒体相关
     MEDIA_REQUESTED = 'media.requested'
@@ -105,30 +100,6 @@ class TelegramNotificationChannel(NotificationChannel):
         return success
 
 
-class WebhookNotificationChannel(NotificationChannel):
-    """Webhook 通知渠道"""
-    
-    def __init__(self):
-        self.enabled = WebhookConfig.WEBHOOK_ENABLED
-    
-    async def send(self, notification: Notification) -> bool:
-        """通过 Webhook 推送通知"""
-        if not self.enabled:
-            return False
-        
-        count = await WebhookPushService.push(
-            event=notification.type.value,
-            data={
-                'title': notification.title,
-                'content': notification.content,
-                'data': notification.data,
-                'target_users': notification.target_users,
-            }
-        )
-        
-        return count > 0
-
-
 class NotificationService:
     """通知服务"""
     
@@ -144,10 +115,6 @@ class NotificationService:
         # 添加 Telegram 渠道
         if Config.TELEGRAM_MODE:
             cls._channels.append(TelegramNotificationChannel())
-        
-        # 添加 Webhook 渠道
-        if WebhookConfig.WEBHOOK_ENABLED:
-            cls._channels.append(WebhookNotificationChannel())
         
         cls._initialized = True
         logger.info(f"通知服务初始化完成，已注册 {len(cls._channels)} 个渠道")
@@ -207,23 +174,6 @@ class NotificationService:
             title="⏰ 用户过期",
             content=f"用户 {username} 已过期",
             data={'username': username},
-        ))
-    
-    @classmethod
-    async def notify_daily_ranking(cls, ranking: List[Dict[str, Any]], date: str) -> int:
-        """通知每日排行榜"""
-        if not ranking:
-            return 0
-        
-        lines = [f"📊 {date} 播放排行榜", ""]
-        for item in ranking[:10]:
-            lines.append(f"{item['rank']}. {item['username']} - {item['value_str']}")
-        
-        return await cls.send(Notification(
-            type=NotificationType.DAILY_RANKING,
-            title=f"📊 {date} 播放排行榜",
-            content="\n".join(lines),
-            data={'ranking': ranking, 'date': date},
         ))
     
     @classmethod

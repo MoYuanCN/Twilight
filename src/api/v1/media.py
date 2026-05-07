@@ -4,6 +4,8 @@
 提供 TMDB 和 Bangumi 统一搜索接口
 支持库存检查和求片功能
 """
+import logging
+
 from flask import Blueprint, request, g
 
 from src.api.v1.auth import require_auth, api_response
@@ -11,6 +13,7 @@ from src.services import MediaService, MediaRequestService, MediaSource, Invento
 from src.db.bangumi import ReqStatus
 
 media_bp = Blueprint('media', __name__, url_prefix='/media')
+logger = logging.getLogger(__name__)
 
 
 # ==================== 媒体搜索 ====================
@@ -98,7 +101,8 @@ async def search_media():
             'results': [r.to_dict() for r in results],
         })
     except Exception as e:
-        return api_response(False, f"搜索失败: {e}", code=500)
+        logger.error(f"统一媒体搜索失败: {e}", exc_info=True)
+        return api_response(False, "搜索失败，请稍后重试", code=500)
 
 
 @media_bp.route('/search/tmdb', methods=['GET'])
@@ -133,7 +137,8 @@ async def search_tmdb():
             'results': [r.to_dict() for r in results],
         })
     except Exception as e:
-        return api_response(False, f"搜索失败: {e}", code=500)
+        logger.error(f"TMDB 搜索失败: {e}", exc_info=True)
+        return api_response(False, "搜索失败，请稍后重试", code=500)
 
 
 @media_bp.route('/search/bangumi', methods=['GET'])
@@ -168,7 +173,8 @@ async def search_bangumi():
             'results': [r.to_dict() for r in results],
         })
     except Exception as e:
-        return api_response(False, f"搜索失败: {e}", code=500)
+        logger.error(f"Bangumi 搜索失败: {e}", exc_info=True)
+        return api_response(False, "搜索失败，请稍后重试", code=500)
 
 
 @media_bp.route('/search/id/<string:source_type>/<int:media_id>', methods=['GET'])
@@ -245,7 +251,7 @@ async def search_media_by_id(source_type: str, media_id: int):
         import logging
         logger = logging.getLogger(__name__)
         logger.error(f"获取媒体详情失败 (source={source_type}, id={media_id}): {e}", exc_info=True)
-        return api_response(False, f"获取失败: {e}", code=500)
+        return api_response(False, "获取失败，请稍后重试", code=500)
 
 
 @media_bp.route('/detail', methods=['GET'])
@@ -289,7 +295,7 @@ async def get_media_detail():
         import logging
         logger = logging.getLogger(__name__)
         logger.error(f"获取媒体详情失败: {e}", exc_info=True)
-        return api_response(False, f"获取失败: {e}", code=500)
+        return api_response(False, "获取失败，请稍后重试", code=500)
 
 
 @media_bp.route('/tmdb/<int:tmdb_id>', methods=['GET'])
@@ -319,7 +325,7 @@ async def get_tmdb_detail(tmdb_id: int):
         import logging
         logger = logging.getLogger(__name__)
         logger.error(f"获取 TMDB 详情失败: {e}", exc_info=True)
-        return api_response(False, f"获取失败: {e}", code=500)
+        return api_response(False, "获取失败，请稍后重试", code=500)
 
 
 @media_bp.route('/bangumi/<int:bgm_id>', methods=['GET'])
@@ -347,7 +353,7 @@ async def get_bangumi_detail(bgm_id: int):
         import logging
         logger = logging.getLogger(__name__)
         logger.error(f"获取 Bangumi 详情失败: {e}", exc_info=True)
-        return api_response(False, f"获取失败: {e}", code=500)
+        return api_response(False, "获取失败，请稍后重试", code=500)
 
 
 # ==================== 库存检查 ====================
@@ -539,11 +545,18 @@ async def create_media_request():
     data = request.get_json() or {}
     
     # 方式1: 直接指定
-    source = data.get('source')
+    source = (data.get('source') or '').lower().strip()
     media_id = data.get('media_id')
     skip_inventory_check = data.get('skip_inventory_check', False)
     season = data.get('season')
     year = data.get('year')  # 年份限制
+    note = (data.get('note') or '').strip()
+
+    if source and source not in ('tmdb', 'bangumi', 'bgm'):
+        return api_response(False, "无效来源，支持: tmdb, bangumi, bgm", code=400)
+
+    if len(note) > 500:
+        return api_response(False, "备注过长，最多 500 字符", code=400)
     
     # 转换 season 为整数
     if season is not None:
@@ -577,9 +590,9 @@ async def create_media_request():
         if data.get('title'):
             media_info = media_info or {}
             media_info['title'] = data.get('title')
-        if data.get('note'):
+        if note:
             media_info = media_info or {}
-            media_info['note'] = data.get('note')
+            media_info['note'] = note
     
     elif query and index is not None:
         # 搜索后选择方式
@@ -593,7 +606,8 @@ async def create_media_request():
             media_id = selected.id
             media_info = selected.to_dict()
         except Exception as e:
-            return api_response(False, f"搜索失败: {e}", code=500)
+            logger.error(f"求片前搜索失败: {e}", exc_info=True)
+            return api_response(False, "搜索失败，请稍后重试", code=500)
     
     else:
         return api_response(False, "缺少必要参数", code=400)

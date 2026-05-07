@@ -376,6 +376,44 @@ export default function AdminUsersPage() {
     }
   };
 
+  const renderUserActions = (user: UserInfo) => (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" size="icon">
+          <MoreHorizontal className="h-4 w-4" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem onClick={() => handleOpenEdit(user)}>
+          <Edit className="mr-2 h-4 w-4" />
+          编辑信息
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onClick={() => {
+            setSelectedUser(user);
+            setRenewOpen(true);
+          }}
+        >
+          <RefreshCw className="mr-2 h-4 w-4" />
+          续期
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => handleResetPassword(user)}>
+          <Key className="mr-2 h-4 w-4" />
+          重置密码
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onClick={() => handleToggleActive(user)}>
+          <Ban className="mr-2 h-4 w-4" />
+          {user.active ? "禁用" : "启用"}
+        </DropdownMenuItem>
+        <DropdownMenuItem className="text-destructive" onClick={() => handleDelete(user)}>
+          <Trash2 className="mr-2 h-4 w-4" />
+          删除
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -405,7 +443,7 @@ export default function AdminUsersPage() {
       {/* Search */}
       <Card>
         <CardContent className="pt-6">
-          <div className="flex gap-4">
+          <div className="flex flex-col gap-3 md:flex-row md:gap-4">
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
@@ -416,9 +454,9 @@ export default function AdminUsersPage() {
                 className="pl-10"
               />
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 md:w-auto">
               <Select value={perPage.toString()} onValueChange={(value) => { setPerPage(Number(value)); setPage(1); invalidateUsersCache(); }}>
-                <SelectTrigger className="w-24">
+                <SelectTrigger className="w-28 md:w-24">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -427,7 +465,7 @@ export default function AdminUsersPage() {
                   <SelectItem value="100">100 / 页</SelectItem>
                 </SelectContent>
               </Select>
-              <Button onClick={handleSearch}>
+              <Button onClick={handleSearch} className="flex-1 md:flex-none">
                 <Search className="mr-2 h-4 w-4" />
                 搜索
               </Button>
@@ -444,7 +482,58 @@ export default function AdminUsersPage() {
               <Loader2 className="h-8 w-8 animate-spin text-primary" />
             </div>
           ) : (
-            <div className="overflow-x-auto">
+            <>
+            <div className="space-y-3 p-3 md:hidden">
+              {users.map((user) => (
+                <div key={user.uid} className="rounded-xl border bg-background p-4 shadow-sm">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="truncate text-base font-medium">{user.username}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">UID: {user.uid}</p>
+                    </div>
+                    {renderUserActions(user)}
+                  </div>
+
+                  <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
+                    <div>
+                      <p className="text-xs text-muted-foreground">角色</p>
+                      <div className="mt-1">{getRoleBadge(user.role)}</div>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">状态</p>
+                      <div className="mt-1">
+                        <Badge variant={user.active ? "success" : "destructive"}>
+                          {user.active ? "正常" : "禁用"}
+                        </Badge>
+                      </div>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">到期时间</p>
+                      <p className={user.expired_at && new Date(user.expired_at) < new Date() ? "mt-1 text-destructive" : "mt-1"}>
+                        {user.expired_at ? formatDate(user.expired_at) : "永久"}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">积分</p>
+                      <p className="mt-1 font-medium">{user.score || 0}</p>
+                    </div>
+                  </div>
+
+                  {(user.telegram_id || user.emby_id) && (
+                    <div className="mt-3 space-y-1 border-t pt-3 text-xs text-muted-foreground">
+                      {user.telegram_id && (
+                        <p>
+                          TG: {user.telegram_username ? `@${user.telegram_username} (${user.telegram_id})` : user.telegram_id}
+                        </p>
+                      )}
+                      {user.emby_id && <p>Emby ID: {user.emby_id}</p>}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            <div className="hidden overflow-x-auto md:block">
               <table className="w-full">
                 <thead>
                   <tr className="border-b bg-muted/50">
@@ -507,44 +596,7 @@ export default function AdminUsersPage() {
                       </td>
                       <td className="px-4 py-3 font-medium">{user.score || 0}</td>
                       <td className="px-4 py-3 text-right">
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="icon">
-                              <MoreHorizontal className="h-4 w-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem onClick={() => handleOpenEdit(user)}>
-                              <Edit className="mr-2 h-4 w-4" />
-                              编辑信息
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              onClick={() => {
-                                setSelectedUser(user);
-                                setRenewOpen(true);
-                              }}
-                            >
-                              <RefreshCw className="mr-2 h-4 w-4" />
-                              续期
-                            </DropdownMenuItem>
-                            <DropdownMenuItem onClick={() => handleResetPassword(user)}>
-                              <Key className="mr-2 h-4 w-4" />
-                              重置密码
-                            </DropdownMenuItem>
-                            <DropdownMenuSeparator />
-                            <DropdownMenuItem onClick={() => handleToggleActive(user)}>
-                              <Ban className="mr-2 h-4 w-4" />
-                              {user.active ? "禁用" : "启用"}
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              className="text-destructive"
-                              onClick={() => handleDelete(user)}
-                            >
-                              <Trash2 className="mr-2 h-4 w-4" />
-                              删除
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
+                        {renderUserActions(user)}
                       </td>
                     </tr>
                     {expandedUserIds.has(user.uid) && (
@@ -571,6 +623,7 @@ export default function AdminUsersPage() {
                 </tbody>
               </table>
             </div>
+            </>
           )}
         </CardContent>
       </Card>

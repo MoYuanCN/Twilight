@@ -7,9 +7,9 @@ import logging
 from flask import Blueprint, request, g
 
 from src.api.v1.auth import require_auth, require_admin, api_response
-from src.config import EmbyReviewConfig
 from src.db.user import UserOperate, UserModel, Role
 from src.db.regcode import RegCodeOperate
+from src.db.score import ScoreOperate
 from src.services import UserService, ScoreService, EmbyService
 from src.services.emby import get_emby_client, EmbyError, EmbyConnectionError
 
@@ -52,18 +52,9 @@ async def list_users():
         offset=offset,
         limit=per_page,
         role=role,
-        include_inactive=include_inactive
+        include_inactive=include_inactive,
+        search=search or None,
     )
-    
-    # 如果有搜索条件，在内存中过滤（简单实现）
-    if search:
-        filtered_users = [u for u in users if search.lower() in (u.USERNAME or '').lower()]
-        # 如果进行了搜索过滤，需要重新计算总数（这里简化处理，使用过滤后的数量）
-        # 实际应该在前端或后端进行更精确的搜索
-        users = filtered_users
-        if search:
-            # 搜索时总数不准确，但至少显示当前页的结果数
-            total = len(users)
     
     # 转换为字典
     user_list = []
@@ -75,10 +66,11 @@ async def list_users():
     except Exception:
         pass
     
+    user_ids = [user.UID for user in users]
+    score_map = await ScoreOperate.get_scores_by_uids(user_ids)
+
     for user in users:
-        # 获取用户积分
-        from src.db.score import ScoreOperate
-        score_record = await ScoreOperate.get_score_by_uid(user.UID)
+        score_record = score_map.get(user.UID)
         
         # 尝试获取 Telegram 用户名
         telegram_username = None
@@ -627,60 +619,6 @@ async def sync_all_emby():
     })
 
 
-@admin_bp.route('/emby/review/inactive', methods=['POST'])
-@require_auth
-@require_admin
-async def review_inactive_emby_users():
-    """手动触发 Emby 不活跃用户审查"""
-    data = request.get_json() or {}
-    threshold_days = data.get('threshold_days', EmbyReviewConfig.INACTIVE_THRESHOLD_DAYS)
-    action = data.get('action', EmbyReviewConfig.INACTIVE_ACTION)
-    delete_emby = data.get('delete_emby', EmbyReviewConfig.INACTIVE_DELETE_EMBY)
-
-    result = await EmbyService.review_inactive_users(
-        action=action,
-        threshold_days=threshold_days,
-        delete_emby=delete_emby,
-    )
-    return api_response(True, "不活跃用户审查完成", result)
-
-
-@admin_bp.route('/emby/review/devices', methods=['POST'])
-@require_auth
-@require_admin
-async def review_emby_device_usage():
-    """手动触发 Emby 设备使用审查"""
-    data = request.get_json() or {}
-    max_devices = data.get('max_devices', EmbyReviewConfig.DEVICE_MAX_COUNT)
-    threshold_days = data.get('threshold_days', EmbyReviewConfig.DEVICE_THRESHOLD_DAYS)
-    action = data.get('action', EmbyReviewConfig.DEVICE_ACTION)
-
-    result = await EmbyService.review_device_usage(
-        max_devices=max_devices,
-        threshold_days=threshold_days,
-        action=action,
-    )
-    return api_response(True, "设备使用审查完成", result)
-
-
-@admin_bp.route('/emby/review/settings', methods=['GET'])
-@require_auth
-@require_admin
-async def get_emby_review_settings():
-    """获取 Emby 审查配置"""
-    return api_response(True, "获取成功", {
-        'enabled': EmbyReviewConfig.ENABLED,
-        'review_time': EmbyReviewConfig.REVIEW_TIME,
-        'inactive_threshold_days': EmbyReviewConfig.INACTIVE_THRESHOLD_DAYS,
-        'inactive_action': EmbyReviewConfig.INACTIVE_ACTION,
-        'inactive_delete_emby': EmbyReviewConfig.INACTIVE_DELETE_EMBY,
-        'device_review_enabled': EmbyReviewConfig.DEVICE_REVIEW_ENABLED,
-        'device_threshold_days': EmbyReviewConfig.DEVICE_THRESHOLD_DAYS,
-        'device_max_count': EmbyReviewConfig.DEVICE_MAX_COUNT,
-        'device_action': EmbyReviewConfig.DEVICE_ACTION,
-    })
-
-
 # ==================== 积分管理 ====================
 
 @admin_bp.route('/users/<int:uid>/score', methods=['PUT'])
@@ -777,6 +715,7 @@ async def list_media_requests():
     import json
     
     page = request.args.get('page', 1, type=int)
+    per_page = min(max(request.args.get('per_page', 20, type=int), 1), 100)
     status_filter = request.args.get('status', 'pending').lower()
     
     # 转换状态
@@ -797,6 +736,9 @@ async def list_media_requests():
         # 其他状态：按状态筛选
         requests = await BangumiRequireOperate.get_all_requires_by_status(target_status)
     
+    telegram_ids = [req.telegram_id for req in requests if req.telegram_id is not None]
+    users_map = await UserOperate.get_users_by_telegram_ids(telegram_ids)
+
     # 转换为字典格式
     results = []
     for req in requests:
@@ -807,8 +749,7 @@ async def list_media_requests():
             except:
                 pass
         
-        # 获取用户信息
-        user = await UserOperate.get_user_by_telegram_id(req.telegram_id)
+        user = users_map.get(req.telegram_id)
         
         status_name = ReqStatus(req.status).name.lower()
         if status_name == 'unhandled':
@@ -843,7 +784,6 @@ async def list_media_requests():
         })
     
     # 分页
-    per_page = 20
     total = len(results)
     start = (page - 1) * per_page
     end = start + per_page
@@ -877,7 +817,10 @@ async def update_or_delete_media_request(request_id: int):
     
     data = request.get_json() or {}
     status_str = data.get('status', '').lower()
-    note = data.get('note', '')
+    note = (data.get('note') or '').strip()
+
+    if len(note) > 1000:
+        return api_response(False, "管理员备注过长，最多 1000 字符", code=400)
     
     # 转换状态
     status_map = {

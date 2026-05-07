@@ -353,25 +353,6 @@ class ScoreService:
 
         return True, f"已{action} {abs(amount)} 积分"
 
-    @staticmethod
-    async def get_ranking(limit: int = 10) -> List[dict]:
-        """获取积分排行榜"""
-        records = await ScoreOperate.get_user_score_ranking(limit)
-        ranking = []
-
-        for i, record in enumerate(records, 1):
-            user = await UserOperate.get_user_by_uid(record.UID)
-            ranking.append({
-                "rank": i,
-                "uid": record.UID,
-                "username": user.USERNAME if user else "未知",
-                "score": record.SCORE,
-                "checkin_days": record.CHECKIN_COUNT,
-            })
-
-        return ranking
-
-
 class RedPacketService:
     """红包业务服务"""
 

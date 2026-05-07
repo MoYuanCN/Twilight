@@ -11,6 +11,8 @@
 
 ## 2. 认证与请求规范
 
+> 说明：`/api/v1/apikey` 相关的权限矩阵与完整调用示例已拆分到 [API_KEY_API.md](./API_KEY_API.md)。本文件保留通用规范与后端主接口。
+
 ### 2.1 认证方式
 
 #### 登录 Token（前端）
@@ -93,9 +95,8 @@ Authorization: ApiKey <api_key>
 | Score | `/score` | 积分、签到、转账、排行榜、红包 |
 | Media | `/media` | TMDB/Bangumi 搜索、求片、库存管理 |
 | Emby | `/emby` | Emby 账号状态、库、搜索、会话 |
-| Admin | `/admin` | 管理用户、Emby 同步与审查、注册码、广播 |
+| Admin | `/admin` | 管理用户、Emby 同步、注册码、广播 |
 | Stats | `/stats` | 播放统计、排行榜 |
-| Webhook | `/webhook` | 事件接收、Webhook 管理、Bangumi 推送 |
 | System | `/system` | 健康、系统信息、配置、路由列表 |
 | API Key | `/apikey` | 外部系统专用 API Key 接口 |
 
@@ -1420,67 +1421,6 @@ curl -X GET "http://localhost:5000/api/v1/admin/emby/libraries" \
   -H "Authorization: Bearer <admin_token>"
 ```
 
-#### 手动触发不活跃用户审查
-
-`POST /admin/emby/review/inactive`
-
-- 认证：管理员 Token
-- 请求体：
-
-```json
-{
-  "threshold_days": 21,
-  "action": "disable",
-  "delete_emby": false
-}
-```
-
-- 示例 cURL：
-
-```bash
-curl -X POST "http://localhost:5000/api/v1/admin/emby/review/inactive" \
-  -H "Authorization: Bearer <admin_token>" \
-  -H "Content-Type: application/json" \
-  -d '{"threshold_days":21,"action":"disable","delete_emby":false}'
-```
-
-#### 手动触发设备使用审查
-
-`POST /admin/emby/review/devices`
-
-- 认证：管理员 Token
-- 请求体：
-
-```json
-{
-  "max_devices": 5,
-  "threshold_days": 30,
-  "action": "kick_oldest"
-}
-```
-
-- 示例 cURL：
-
-```bash
-curl -X POST "http://localhost:5000/api/v1/admin/emby/review/devices" \
-  -H "Authorization: Bearer <admin_token>" \
-  -H "Content-Type: application/json" \
-  -d '{"max_devices":5,"threshold_days":30,"action":"kick_oldest"}'
-```
-
-#### 获取 Emby 审查配置
-
-`GET /admin/emby/review/settings`
-
-- 认证：管理员 Token
-
-- 示例 cURL：
-
-```bash
-curl -X GET "http://localhost:5000/api/v1/admin/emby/review/settings" \
-  -H "Authorization: Bearer <admin_token>"
-```
-
 ### 10.3 规则与配置
 
 #### 查询注册码列表
@@ -1780,371 +1720,7 @@ curl -X GET "http://localhost:5000/api/v1/stats/ranking/daily?limit=20" \
   -H "Authorization: Bearer <token>"
 ```
 
-## 12. Webhook 模块
-
-### 接收 Emby Webhook
-
-`POST /webhook/emby`
-
-- 说明：接收 Emby Webhook
-- 认证：视配置而定，通常由 Emby 服务器调用
-- 请求体示例：
-
-```json
-{
-  "event": "PlaybackStart",
-  "user_id": "emby_user_id",
-  "item_id": "movie_123"
-}
-```
-
-- 示例 cURL：
-
-```bash
-curl -X POST "http://localhost:5000/api/v1/webhook/emby" \
-  -H "Content-Type: application/json" \
-  -d '{"event":"PlaybackStart","user_id":"emby_user_id","item_id":"movie_123"}'
-```
-
-### 接收 Jellyfin Webhook
-
-`POST /webhook/jellyfin`
-
-- 请求体示例：
-
-```json
-{
-  "event": "PlaybackStart",
-  "user_id": "jellyfin_user_id"
-}
-```
-
-- 示例 cURL：
-
-```bash
-curl -X POST "http://localhost:5000/api/v1/webhook/jellyfin" \
-  -H "Content-Type: application/json" \
-  -d '{"event":"PlaybackStart","user_id":"jellyfin_user_id"}'
-```
-
-### 接收自定义 Webhook
-
-`POST /webhook/custom`
-
-- 请求体示例：
-
-```json
-{
-  "type": "custom_event",
-  "payload": {"foo":"bar"}
-}
-```
-
-- 示例 cURL：
-
-```bash
-curl -X POST "http://localhost:5000/api/v1/webhook/custom" \
-  -H "Content-Type: application/json" \
-  -d '{"type":"custom_event","payload":{"foo":"bar"}}'
-```
-
-### 查询 Webhook 订阅列表
-
-`GET /webhook/endpoints`
-
-- 认证：登录 Token
-
-- 示例 cURL：
-
-```bash
-curl -X GET "http://localhost:5000/api/v1/webhook/endpoints" \
-  -H "Authorization: Bearer <token>"
-```
-
-### 添加 Webhook 订阅
-
-`POST /webhook/endpoints`
-
-- 认证：登录 Token
-- 请求体：
-
-```json
-{
-  "url": "https://example.com/webhook",
-  "events": ["PlaybackStart", "PlaybackStop"]
-}
-```
-
-- 示例 cURL：
-
-```bash
-curl -X POST "http://localhost:5000/api/v1/webhook/endpoints" \
-  -H "Authorization: Bearer <token>" \
-  -H "Content-Type: application/json" \
-  -d '{"url":"https://example.com/webhook","events":["PlaybackStart","PlaybackStop"]}'
-```
-
-### 删除 Webhook 订阅
-
-`DELETE /webhook/endpoints`
-
-- 认证：登录 Token
-- 请求体：
-
-```json
-{
-  "url": "https://example.com/webhook"
-}
-```
-
-- 示例 cURL：
-
-```bash
-curl -X DELETE "http://localhost:5000/api/v1/webhook/endpoints" \
-  -H "Authorization: Bearer <token>" \
-  -H "Content-Type: application/json" \
-  -d '{"url":"https://example.com/webhook"}'
-```
-
-### 发送测试 Webhook
-
-`POST /webhook/test`
-
-- 认证：登录 Token
-- 请求体：
-
-```json
-{
-  "url": "https://example.com/webhook",
-  "payload": {"test":"data"}
-}
-```
-
-- 示例 cURL：
-
-```bash
-curl -X POST "http://localhost:5000/api/v1/webhook/test" \
-  -H "Authorization: Bearer <token>" \
-  -H "Content-Type: application/json" \
-  -d '{"url":"https://example.com/webhook","payload":{"test":"data"}}'
-```
-
-### Bangumi 与 Emby 同步事件
-
-`POST /webhook/bangumi/emby`
-
-- 请求体示例：
-
-```json
-{
-  "bangumi_id": 123,
-  "emby_id": "emby_user_id"
-}
-```
-
-- 示例 cURL：
-
-```bash
-curl -X POST "http://localhost:5000/api/v1/webhook/bangumi/emby" \
-  -H "Content-Type: application/json" \
-  -d '{"bangumi_id":123,"emby_id":"emby_user_id"}'
-```
-
-### Bangumi 与 Jellyfin 同步事件
-
-`POST /webhook/bangumi/jellyfin`
-
-- 请求体示例：
-
-```json
-{
-  "bangumi_id": 123,
-  "jellyfin_id": "jellyfin_user_id"
-}
-```
-
-- 示例 cURL：
-
-```bash
-curl -X POST "http://localhost:5000/api/v1/webhook/bangumi/jellyfin" \
-  -H "Content-Type: application/json" \
-  -d '{"bangumi_id":123,"jellyfin_id":"jellyfin_user_id"}'
-```
-
-### Bangumi 与 Plex 同步事件
-
-`POST /webhook/bangumi/plex`
-
-- 请求体示例：
-
-```json
-{
-  "bangumi_id": 123,
-  "plex_id": "plex_user_id"
-}
-```
-
-- 示例 cURL：
-
-```bash
-curl -X POST "http://localhost:5000/api/v1/webhook/bangumi/plex" \
-  -H "Content-Type: application/json" \
-  -d '{"bangumi_id":123,"plex_id":"plex_user_id"}'
-```
-
-### 自定义 Bangumi 同步事件
-
-`POST /webhook/bangumi/custom`
-
-- 请求体示例：
-
-```json
-{
-  "source": "custom",
-  "payload": {"id": 123, "name": "测试"}
-}
-```
-
-- 示例 cURL：
-
-```bash
-curl -X POST "http://localhost:5000/api/v1/webhook/bangumi/custom" \
-  -H "Content-Type: application/json" \
-  -d '{"source":"custom","payload":{"id":123,"name":"测试"}}'
-```
-
-### 查询 Bangumi 映射
-
-`GET /webhook/bangumi/mappings`
-
-- 认证：登录 Token
-
-- 示例 cURL：
-
-```bash
-curl -X GET "http://localhost:5000/api/v1/webhook/bangumi/mappings" \
-  -H "Authorization: Bearer <token>"
-```
-
-### 创建 Bangumi 映射
-
-`POST /webhook/bangumi/mappings`
-
-- 认证：登录 Token
-- 请求体：
-
-```json
-{
-  "bangumi_id": 123,
-  "emby_id": "emby_media_id"
-}
-```
-
-- 示例 cURL：
-
-```bash
-curl -X POST "http://localhost:5000/api/v1/webhook/bangumi/mappings" \
-  -H "Authorization: Bearer <token>" \
-  -H "Content-Type: application/json" \
-  -d '{"bangumi_id":123,"emby_id":"emby_media_id"}'
-```
-
-### 删除 Bangumi 映射
-
-`DELETE /webhook/bangumi/mappings`
-
-- 认证：登录 Token
-- 请求体：
-
-```json
-{
-  "mapping_id": 456
-}
-```
-
-- 示例 cURL：
-
-```bash
-curl -X DELETE "http://localhost:5000/api/v1/webhook/bangumi/mappings" \
-  -H "Authorization: Bearer <token>" \
-  -H "Content-Type: application/json" \
-  -d '{"mapping_id":456}'
-```
-
-### 导入 Bangumi 映射
-
-`POST /webhook/bangumi/mappings/import`
-
-- 认证：登录 Token
-- 请求体：
-
-```json
-{
-  "mappings": [
-    {"bangumi_id":123,"emby_id":"emby_media_id"}
-  ]
-}
-```
-
-- 示例 cURL：
-
-```bash
-curl -X POST "http://localhost:5000/api/v1/webhook/bangumi/mappings/import" \
-  -H "Authorization: Bearer <token>" \
-  -H "Content-Type: application/json" \
-  -d '{"mappings":[{"bangumi_id":123,"emby_id":"emby_media_id"}]}'
-```
-
-### 导出 Bangumi 映射
-
-`GET /webhook/bangumi/mappings/export`
-
-- 认证：登录 Token
-
-- 示例 cURL：
-
-```bash
-curl -X GET "http://localhost:5000/api/v1/webhook/bangumi/mappings/export" \
-  -H "Authorization: Bearer <token>"
-```
-
-### 触发 Bangumi 同步
-
-`POST /webhook/bangumi/sync`
-
-- 认证：登录 Token
-- 请求体：
-
-```json
-{
-  "type": "full",
-  "target": "emby"
-}
-```
-
-- 示例 cURL：
-
-```bash
-curl -X POST "http://localhost:5000/api/v1/webhook/bangumi/sync" \
-  -H "Authorization: Bearer <token>" \
-  -H "Content-Type: application/json" \
-  -d '{"type":"full","target":"emby"}'
-```
-
-### 获取 Bangumi Webhook 配置
-
-`GET /webhook/bangumi/config`
-
-- 认证：登录 Token
-
-- 示例 cURL：
-
-```bash
-curl -X GET "http://localhost:5000/api/v1/webhook/bangumi/config" \
-  -H "Authorization: Bearer <token>"
-```
-
-## 13. System 模块
+## 12. System 模块
 
 ### 健康检查
 
@@ -2248,9 +1824,9 @@ curl -X GET "http://localhost:5000/api/v1/system/admin/config/schema" \
 ```json
 {
   "sections": {
-    "EmbyReview": {
+    "BangumiSync": {
       "enabled": true,
-      "review_time": "04:00"
+      "min_progress_percent": 80
     }
   }
 }
@@ -2262,7 +1838,7 @@ curl -X GET "http://localhost:5000/api/v1/system/admin/config/schema" \
 curl -X PUT "http://localhost:5000/api/v1/system/admin/config/schema" \
   -H "Authorization: Bearer <admin_token>" \
   -H "Content-Type: application/json" \
-  -d '{"sections":{"EmbyReview":{"enabled":true,"review_time":"04:00"}}}'
+  -d '{"sections":{"BangumiSync":{"enabled":true,"min_progress_percent":80}}}'
 ```
 
 ### 获取全部路由列表
@@ -2293,13 +1869,13 @@ curl -X GET "http://localhost:5000/api/v1/system/admin/emby/libraries" \
   -H "Authorization: Bearer <admin_token>"
 ```
 
-## 14. 附录
+## 13. 附录
 
-### 14.1 API Key 文档
+### 13.1 API Key 文档
 
 API Key 相关接口请参考 `docs/API_KEY_API.md`。
 
-### 14.2 说明
+### 13.2 说明
 
 - 管理员接口需要管理员登录 Token。
 - 外部系统推荐使用 API Key 访问 `/api/v1/apikey/*`。

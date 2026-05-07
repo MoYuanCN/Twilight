@@ -70,12 +70,6 @@ from src.services.media_service import (
 from src.services.stats_service import (
     StatsService,
 )
-from src.services.webhook import (
-    WebhookService,
-    WebhookPushService,
-    WebhookEvent,
-    WebhookPayload,
-)
 from src.services.notification import (
     NotificationService,
     NotificationType,
@@ -151,11 +145,6 @@ __all__ = [
     'InventoryCheckResult',
     # 统计服务
     'StatsService',
-    # Webhook 服务
-    'WebhookService',
-    'WebhookPushService',
-    'WebhookEvent',
-    'WebhookPayload',
     # 通知服务
     'NotificationService',
     'NotificationType',

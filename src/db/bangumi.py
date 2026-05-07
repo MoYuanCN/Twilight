@@ -185,7 +185,18 @@ class BangumiRequireOperate:
         """根据 Key 更新求片状态"""
         async with BangumiSessionFactory() as session:
             async with session.begin():
-                req = await BangumiRequireOperate.get_require_by_key(require_key)
+                req = None
+                # 在同一 session 中查询并更新，避免跨会话 merge 带来的性能与一致性问题
+                result = await session.execute(
+                    select(BangumiRequireModel).filter_by(require_key=require_key).limit(1)
+                )
+                req = result.scalar_one_or_none()
+                if req is None:
+                    result = await session.execute(
+                        select(TMDBRequireModel).filter_by(require_key=require_key).limit(1)
+                    )
+                    req = result.scalar_one_or_none()
+
                 if req:
                     req.status = status.value
                     if note:
@@ -199,14 +210,16 @@ class BangumiRequireOperate:
         """检查媒体是否已被请求过"""
         async with BangumiSessionFactory() as session:
             if source == 'bangumi':
-                stmt = select(BangumiRequireModel).filter_by(bangumi_id=int(unique_id))
+                model = BangumiRequireModel
+                stmt = select(model).filter_by(bangumi_id=int(unique_id))
                 if season is not None:
                     stmt = stmt.filter_by(season=season)
             else:
-                stmt = select(TMDBRequireModel).filter_by(tmdb_id=str(unique_id))
+                model = TMDBRequireModel
+                stmt = select(model).filter_by(tmdb_id=str(unique_id))
                 if season is not None:
                     stmt = stmt.filter_by(season=season)
-            
+            stmt = stmt.order_by(model.timestamp.desc(), model.id.desc())
             result = await session.execute(stmt.limit(1))
             return result.scalar_one_or_none()
 
@@ -223,9 +236,10 @@ class BangumiRequireOperate:
                             model.status == ReqStatus.ACCEPTED.value,
                             model.status == ReqStatus.DOWNLOADING.value
                         )
-                    )
+                    ).order_by(model.timestamp.desc(), model.id.desc())
                 )
                 results.extend(list(result.scalars().all()))
+            results.sort(key=lambda r: (r.timestamp or 0, r.id or 0), reverse=True)
             return results
 
     @staticmethod
@@ -235,9 +249,10 @@ class BangumiRequireOperate:
             results = []
             for model in [BangumiRequireModel, TMDBRequireModel]:
                 result = await session.execute(
-                    select(model).filter_by(telegram_id=telegram_id)
+                    select(model).filter_by(telegram_id=telegram_id).order_by(model.timestamp.desc(), model.id.desc())
                 )
                 results.extend(list(result.scalars().all()))
+            results.sort(key=lambda r: (r.timestamp or 0, r.id or 0), reverse=True)
             return results
 
     @staticmethod
@@ -247,9 +262,10 @@ class BangumiRequireOperate:
             results = []
             for model in [BangumiRequireModel, TMDBRequireModel]:
                 result = await session.execute(
-                    select(model).filter_by(status=status.value)
+                    select(model).filter_by(status=status.value).order_by(model.timestamp.desc(), model.id.desc())
                 )
                 results.extend(list(result.scalars().all()))
+            results.sort(key=lambda r: (r.timestamp or 0, r.id or 0), reverse=True)
             return results
 
     @staticmethod

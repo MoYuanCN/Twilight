@@ -20,6 +20,31 @@ function isAbortError(error: unknown): boolean {
 class ApiClient {
   private token: string | null = null;
 
+  private normalizeRequestStatus(status?: string | null, mode: "user" | "admin" = "user"): string {
+    const raw = (status || "").trim().toLowerCase();
+    if (mode === "admin") {
+      const adminMap: Record<string, string> = {
+        pending: "pending",
+        unhandled: "pending",
+        accepted: "accepted",
+        rejected: "rejected",
+        completed: "completed",
+        downloading: "downloading",
+      };
+      return adminMap[raw] || "pending";
+    }
+
+    const userMap: Record<string, string> = {
+      pending: "UNHANDLED",
+      unhandled: "UNHANDLED",
+      accepted: "ACCEPTED",
+      rejected: "REJECTED",
+      completed: "COMPLETED",
+      downloading: "DOWNLOADING",
+    };
+    return userMap[raw] || (status || "UNHANDLED").toUpperCase();
+  }
+
   private toAbsoluteAssetUrl(url?: string | null): string | null {
     if (!url) return null;
     if (/^(https?:)?\/\//i.test(url) || url.startsWith("data:") || url.startsWith("blob:")) {
@@ -197,7 +222,7 @@ class ApiClient {
   }
 
   async register(data: RegisterData) {
-    return this.request<{ uid: number }>("/users/register", {
+    return this.request<RegisterResponse>("/users/register", {
       method: "POST",
       body: JSON.stringify(data),
     });
@@ -258,6 +283,24 @@ class ApiClient {
     return this.request<{ bind_code: string; expires_in: number }>("/users/me/telegram/bind-code", {
       method: "POST",
     });
+  }
+
+  async getRegisterBindCode() {
+    return this.request<{ bind_code: string; expires_in: number }>("/users/telegram/register/bind-code", {
+      method: "POST",
+    });
+  }
+
+  async getRegisterAvailability() {
+    return this.request<RegisterAvailability>("/users/check-available");
+  }
+
+  async getEmbyRegisterStatus(requestId: string, statusToken: string) {
+    const query = new URLSearchParams({
+      request_id: requestId,
+      status_token: statusToken,
+    });
+    return this.request<EmbyRegisterStatus>(`/users/register/emby/status?${query.toString()}`);
   }
 
   async requestTelegramRebind(reason?: string) {
@@ -347,12 +390,6 @@ class ApiClient {
       method: "POST",
       body: JSON.stringify({ to_uid: toUid, amount, note }),
     });
-  }
-
-  async getScoreRanking(limit = 10) {
-    return this.request<{ ranking: ScoreRankingItem[]; score_name: string }>(
-      `/score/ranking?limit=${limit}`
-    );
   }
 
   async getScoreConfig() {
@@ -469,10 +506,17 @@ class ApiClient {
   }
 
   async getMyRequests(signal?: AbortSignal) {
-    return this.request<MediaRequest[]>(
+    const res = await this.request<MediaRequest[]>(
       "/media/request/my",
       { signal }
     );
+    if (res.success && Array.isArray(res.data)) {
+      res.data = res.data.map((item) => ({
+        ...item,
+        status: this.normalizeRequestStatus(item.status, "user"),
+      }));
+    }
+    return res;
   }
 
   // Emby
@@ -492,17 +536,6 @@ class ApiClient {
     return this.request(`/emby/devices/${deviceId}`, {
       method: "DELETE",
     });
-  }
-
-  // Stats
-  async getMyStats() {
-    return this.request<PlaybackStats>("/stats/playback/my");
-  }
-
-  async getTopMedia(period = "week", limit = 10) {
-    return this.request<{ ranking: TopMediaItem[]; period: string }>(
-      `/stats/ranking/media?period=${period}&limit=${limit}`
-    );
   }
 
   // Admin
@@ -634,47 +667,6 @@ class ApiClient {
     return this.request<{ success: number; failed: number; errors: string[] }>("/admin/emby/sync", {
       method: "POST",
     });
-  }
-
-  async reviewInactiveEmbyUsers(data?: { threshold_days?: number; action?: string; delete_emby?: boolean }) {
-    return this.request<{
-      processed: Array<any>;
-      skipped: Array<any>;
-      failed: Array<any>;
-      threshold_days: number;
-      action: string;
-    }>("/admin/emby/review/inactive", {
-      method: "POST",
-      body: JSON.stringify(data || {}),
-    });
-  }
-
-  async reviewEmbyDeviceUsage(data?: { max_devices?: number; threshold_days?: number; action?: string }) {
-    return this.request<{
-      processed: Array<any>;
-      skipped: Array<any>;
-      failed: Array<any>;
-      max_devices: number;
-      threshold_days: number;
-      action: string;
-    }>("/admin/emby/review/devices", {
-      method: "POST",
-      body: JSON.stringify(data || {}),
-    });
-  }
-
-  async getEmbyReviewSettings() {
-    return this.request<{
-      enabled: boolean;
-      review_time: string;
-      inactive_threshold_days: number;
-      inactive_action: string;
-      inactive_delete_emby: boolean;
-      device_review_enabled: boolean;
-      device_threshold_days: number;
-      device_max_count: number;
-      device_action: string;
-    }>("/admin/emby/review/settings");
   }
 
   // Emby 管理
@@ -951,16 +943,25 @@ class ApiClient {
     const query = new URLSearchParams();
     if (params.page) query.set("page", String(params.page));
     if (params.status) query.set("status", params.status);
-    return this.request<{ requests: MediaRequest[]; total: number }>(
+    const res = await this.request<{ requests: MediaRequest[]; total: number }>(
       `/admin/media-requests?${query}`,
       { signal }
     );
+    if (res.success && res.data?.requests) {
+      res.data.requests = res.data.requests.map((item) => ({
+        ...item,
+        status: this.normalizeRequestStatus(item.status, "admin"),
+      }));
+    }
+    return res;
   }
 
   async updateMediaRequest(id: number, status: string, note?: string) {
+    const normalizedStatus = this.normalizeRequestStatus(status, "admin");
+    const normalizedNote = (note || "").trim().slice(0, 1000);
     return this.request(`/admin/media-requests/${id}`, {
       method: "PUT",
-      body: JSON.stringify({ status, note }),
+      body: JSON.stringify({ status: normalizedStatus, note: normalizedNote }),
     });
   }
 
@@ -1120,14 +1121,6 @@ export interface ScoreInfo {
   total_spent: number;
 }
 
-export interface ScoreRankingItem {
-  rank: number;
-  uid: number;
-  username: string;
-  score: number;
-  checkin_days: number;
-}
-
 export interface ScoreConfig {
   score_name: string;
   checkin: {
@@ -1283,31 +1276,54 @@ export interface EmbyDevice {
   last_used: string;
 }
 
-export interface PlaybackStats {
-  total_plays: number;
-  total_time: number;
-  favorite_genres?: string[];
-  recent_items?: {
-    name: string;
-    type: string;
-    played_at: string;
-  }[];
-}
-
-export interface TopMediaItem {
-  item_id: string;
-  item_name: string;
-  item_type: string;
-  play_count: number;
-  total_duration: number;
-}
-
 export interface RegisterData {
-  telegram_id?: number;
+  telegram_bind_code?: string;
   username: string;
-  password: string;
+  password?: string;
   email?: string;
   reg_code?: string;
+  registration_target?: "system" | "emby";
+}
+
+export interface RegisterResponse {
+  registration_target?: "system" | "emby";
+  uid?: number;
+  username?: string;
+  password?: string;
+  user?: UserInfo;
+  request_id?: string;
+  status_token?: string;
+  status?: "queued" | "processing" | "success" | "failed";
+  queue_position?: number;
+  reused?: boolean;
+}
+
+export interface RegisterAvailability {
+  available: boolean;
+  message: string;
+  current_users: number;
+  max_users: number;
+  register_mode: boolean;
+  score_register_mode: boolean;
+  score_register_need: number;
+  allow_pending_register: boolean;
+  emby_direct_register_enabled: boolean;
+  emby_direct_register_days: number;
+}
+
+export interface EmbyRegisterStatus {
+  request_id: string;
+  status: "queued" | "processing" | "success" | "failed";
+  queue_position?: number;
+  message?: string;
+  created_at?: number;
+  updated_at?: number;
+  finished_at?: number;
+  data?: {
+    uid?: number;
+    username?: string;
+    emby_password?: string;
+  };
 }
 
 export interface AdminUserListParams {
