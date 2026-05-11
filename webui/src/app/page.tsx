@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuthStore } from "@/store/auth";
 import { useSystemStore } from "@/store/system";
+import { SITE_NAME } from "@/lib/site-config";
 import { Sparkles } from "lucide-react";
 
 export default function Home() {
@@ -32,7 +33,7 @@ export default function Home() {
         <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-white/10 backdrop-blur-xl animate-pulse">
           <Sparkles className="h-8 w-8 text-white" />
         </div>
-        <h1 className="text-2xl font-bold text-white">{systemInfo?.name || "Twilight"}</h1>
+        <h1 className="text-2xl font-bold text-white">{systemInfo?.name || SITE_NAME}</h1>
         <p className="text-white/60">正在加载...</p>
       </div>
     </main>

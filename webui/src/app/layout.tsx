@@ -3,11 +3,21 @@ import { GeistSans } from "geist/font/sans";
 import { GeistMono } from "geist/font/mono";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/toaster";
+import { SITE_DESCRIPTION, SITE_ICON, SITE_TITLE } from "../lib/site-config";
 import "./globals.css";
 
+const metadataIcons: Metadata["icons"] | undefined = SITE_ICON
+  ? {
+      icon: SITE_ICON,
+      shortcut: SITE_ICON,
+      apple: SITE_ICON,
+    }
+  : undefined;
+
 export const metadata: Metadata = {
-  title: "Twilight - Emby 管理系统",
-  description: "一个功能完善的 Emby/Jellyfin 用户管理系统",
+  title: SITE_TITLE,
+  description: SITE_DESCRIPTION,
+  ...(metadataIcons ? { icons: metadataIcons } : {}),
 };
 
 export default function RootLayout({

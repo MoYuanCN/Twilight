@@ -11,6 +11,7 @@ import { Card, CardDescription, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { api, type EmbyRegisterStatus, type RegisterAvailability, type RegisterData } from "@/lib/api";
+import { SITE_NAME } from "@/lib/site-config";
 import { useAuthStore } from "@/store/auth";
 import { useSystemStore } from "@/store/system";
 
@@ -342,7 +343,7 @@ export default function RegisterPage() {
                   <ShieldPlus className="h-7 w-7" />
                 </div>
                 <div>
-                  <h2 className="text-xl font-semibold">欢迎来到 {systemInfo?.name || "Twilight"}</h2>
+                  <h2 className="text-xl font-semibold">欢迎来到 {systemInfo?.name || SITE_NAME}</h2>
                   <p className="text-sm text-muted-foreground">
                     系统账号用于网页登录与个人设置；Emby 账号用于媒体播放，两者注册入口已分离。
                   </p>
@@ -386,7 +387,7 @@ export default function RegisterPage() {
                       </TabsTrigger>
                     </TabsList>
                     <TabsContent value="system" className="mt-3 rounded-xl border border-border/70 bg-muted/30 p-3 text-sm text-muted-foreground">
-                      系统账号用于登录 Twilight 网页端、管理个人设置、绑定信息等，不会自动创建 Emby 账号。
+                      系统账号用于登录 {SITE_NAME} 网页端、管理个人设置、绑定信息等，不会自动创建 Emby 账号。
                     </TabsContent>
                     <TabsContent value="emby" className="mt-3 rounded-xl border border-border/70 bg-muted/30 p-3 text-sm text-muted-foreground">
                       Emby 账号注册会进入安全队列，系统完成 TG 绑定校验与人数上限校验后再创建账号。

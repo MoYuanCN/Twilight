@@ -12,6 +12,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { useToast } from "@/hooks/use-toast";
 import { useAuthStore } from "@/store/auth";
 import { useSystemStore } from "@/store/system";
+import { SITE_NAME } from "@/lib/site-config";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -83,7 +84,7 @@ export default function LoginPage() {
             </div>
 
             <CardTitle className="text-2xl font-semibold tracking-tight">
-              进入 {systemInfo?.name || "Twilight"}
+              进入 {systemInfo?.name || SITE_NAME}
             </CardTitle>
             <CardDescription className="text-sm">
               访问你的媒体控制台

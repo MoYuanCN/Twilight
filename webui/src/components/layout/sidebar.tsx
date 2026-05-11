@@ -26,6 +26,7 @@ import { useTheme } from "next-themes";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { api } from "@/lib/api";
+import { SITE_NAME } from "@/lib/site-config";
 import { useRegionRefresh } from "@/hooks/use-region-refresh";
 import { RegionRefreshKeys } from "@/lib/region-refresh";
 import { useSystemStore } from "@/store/system";
@@ -95,6 +96,8 @@ export function Sidebar() {
     }, [loadProfileAvatar])
   );
 
+  const displaySiteName = systemInfo?.name || SITE_NAME;
+
   const toggleTheme = (event: React.MouseEvent) => {
     const x = event.clientX;
     const y = event.clientY;
@@ -139,13 +142,13 @@ export function Sidebar() {
       <div className="sidebar-surface h-full">
         <div className="sidebar-brand">
           {systemInfo?.icon ? (
-            <img src={systemInfo.icon} alt={systemInfo?.name || "Twilight"} className="h-10 w-10 rounded-xl object-cover" />
+            <img src={systemInfo.icon} alt={displaySiteName} className="h-10 w-10 rounded-xl object-cover" />
           ) : (
-            <div className="brand-logo">{(systemInfo?.name || "TW").slice(0, 2).toUpperCase()}</div>
+            <div className="brand-logo">{displaySiteName.slice(0, 2).toUpperCase()}</div>
           )}
           <div>
             <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Media OPS</p>
-            <h2 className="text-lg font-semibold">{systemInfo?.name || "Twilight"}</h2>
+            <h2 className="text-lg font-semibold">{displaySiteName}</h2>
           </div>
         </div>
 
