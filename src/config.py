@@ -313,7 +313,7 @@ class APIConfig(BaseConfig):
     TOKEN_EXPIRE: int = 864000  # Token 过期时间（秒）
     API_KEY_LENGTH: int = 32
     CORS_ENABLED: bool = True
-    CORS_ORIGINS: List[str] = []
+    CORS_ORIGINS: List[str] = ["*"]
     UPLOAD_FOLDER: str = str(ROOT_PATH / 'uploads')  # 文件上传目录
     MAX_UPLOAD_SIZE: int = 5 * 1024 * 1024  # 最大上传文件大小（字节）
     SESSION_COOKIE_NAME: str = 'twilight_session'

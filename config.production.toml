@@ -168,8 +168,8 @@ token_expire = 864000
 api_key_length = 32
 # 是否启用 CORS 跨域
 cors_enabled = true
-# 允许的跨域来源（生产环境必须配置为前端域名白名单）
-cors_origins = ["https://your-domain.com"]
+# 允许的跨域来源（生产环境建议配置为前端域名白名单）
+cors_origins = ["*"]
 # 文件上传目录（相对于项目根目录或绝对路径）
 # upload_folder = "uploads"
 # 最大上传文件大小（字节，默认 5MB）
