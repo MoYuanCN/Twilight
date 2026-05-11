@@ -1,6 +1,5 @@
 from enum import Enum
 import json
-import random
 import time
 import hashlib
 from typing import Optional
@@ -150,6 +149,11 @@ ENGINE, UsersSessionFactory = init_async_db("users", UsersDatabaseModel)
 
 class UserOperate:
     @staticmethod
+    def _hash_apikey(apikey: str) -> str:
+        """对 API Key 做单向哈希，避免数据库明文存储。"""
+        return hashlib.sha256(apikey.encode('utf-8')).hexdigest()
+
+    @staticmethod
     async def get_new_uid() -> int:
         """生成一个新的UID"""
         async with UsersSessionFactory() as session:
@@ -223,28 +227,14 @@ class UserOperate:
     
     @staticmethod
     async def get_user_by_emby_username(username: str) -> Optional[UserModel]:
-        """根据 Emby/Jellyfin 用户名查找用户，兼容单独存储的 Emby 用户名"""
+        """根据 Emby/Jellyfin 用户名查找用户（不再兼容旧 OTHER 扫描逻辑）。"""
         async with UsersSessionFactory() as session:
-            scalar = await session.execute(select(UserModel).filter_by(USERNAME=username).limit(1))
-            user = scalar.scalar_one_or_none()
-            if user:
-                return user
-
-            # 兼容旧数据：OTHER 字段可能存储了 embay_username
-            result = await session.execute(
-                select(UserModel).where(UserModel.OTHER.isnot(None), UserModel.OTHER != '')
+            scalar = await session.execute(
+                select(UserModel)
+                .where(func.lower(UserModel.USERNAME) == username.lower())
+                .limit(1)
             )
-            for candidate in result.scalars().all():
-                if not candidate.OTHER:
-                    continue
-                try:
-                    other = json.loads(candidate.OTHER)
-                except (json.JSONDecodeError, TypeError):
-                    continue
-                embay_username = other.get('emby_username')
-                if isinstance(embay_username, str) and embay_username.lower() == username.lower():
-                    return candidate
-            return None
+            return scalar.scalar_one_or_none()
 
     @staticmethod
     async def update_user(user: UserModel) -> None:
@@ -328,20 +318,17 @@ class UserOperate:
     @staticmethod
     async def reset_apikey(usr: UserModel) -> str:
         """
-        重置用户API Key (加密安全)
-        格式为 key-xxxxxxxxxxxxxxxx-yyyyyyyy
-        其中 xxxxxxxxxxxxxxxx 为16位随机字符串，yyyyyyyy 为8位数字校验码
+        重置用户 API Key（数据库仅保存哈希，明文仅返回一次）
         """
         import secrets
-        random_part = secrets.token_hex(8)  # 16 字符
-        check_part = ''.join(secrets.choice('0123456789') for _ in range(8))
-        new_apikey = f'key-{random_part}-{check_part}'
+        new_apikey = f"key-{secrets.token_hex(24)}"
+        apikey_hash = UserOperate._hash_apikey(new_apikey)
 
         async with UsersSessionFactory() as session:
             async with session.begin():
                 await session.execute(
                     update(UserModel).where(UserModel.UID == usr.UID).values(
-                        APIKEY=new_apikey,
+                        APIKEY=apikey_hash,
                         APIKEY_STATUS=True
                     )
                 )
@@ -350,9 +337,10 @@ class UserOperate:
     @staticmethod
     async def get_user_by_apikey(apikey: str) -> Optional[UserModel]:
         """根据 API Key 获取用户"""
+        apikey_hash = UserOperate._hash_apikey(apikey)
         async with UsersSessionFactory() as session:
             scalar = await session.execute(
-                select(UserModel).filter_by(APIKEY=apikey, APIKEY_STATUS=True).limit(1)
+                select(UserModel).filter_by(APIKEY=apikey_hash, APIKEY_STATUS=True).limit(1)
             )
             return scalar.scalar_one_or_none()
 

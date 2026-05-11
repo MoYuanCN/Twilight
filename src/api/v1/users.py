@@ -4,6 +4,7 @@
 提供用户相关的 CRUD 操作
 """
 import json
+import hmac
 import logging
 from urllib.parse import urlparse
 from flask import Blueprint, request, g
@@ -50,7 +51,7 @@ async def register():
     data = request.get_json() or {}
     
     telegram_id = data.get('telegram_id')
-    telegram_bind_code = (data.get('telegram_bind_code') or '').strip()
+    telegram_bind_code = (data.get('telegram_bind_code') or '').strip().upper()
     registration_target = (data.get('registration_target') or 'system').strip().lower()
     username = data.get('username')
     password = data.get('password')  # Web 端用户设置的密码
@@ -1072,6 +1073,20 @@ import string as _string
 _tg_bind_codes: dict = {}
 
 _BIND_CODE_EXPIRE = 300  # 绑定码有效期（秒）
+_MAX_BIND_CODES = 20000
+
+
+def _detect_image_extension(header: bytes) -> str | None:
+    """根据魔数识别图片扩展名。"""
+    if header.startswith(b'\xff\xd8\xff'):
+        return 'jpg'
+    if header.startswith(b'\x89PNG\r\n\x1a\n'):
+        return 'png'
+    if header.startswith(b'GIF87a') or header.startswith(b'GIF89a'):
+        return 'gif'
+    if len(header) >= 12 and header.startswith(b'RIFF') and header[8:12] == b'WEBP':
+        return 'webp'
+    return None
 
 def _cleanup_expired_codes():
     """清理过期绑定码"""
@@ -1079,6 +1094,17 @@ def _cleanup_expired_codes():
     expired = [k for k, v in _tg_bind_codes.items() if now - v['created_at'] > _BIND_CODE_EXPIRE]
     for k in expired:
         del _tg_bind_codes[k]
+
+    if len(_tg_bind_codes) <= _MAX_BIND_CODES:
+        return
+
+    overflow = len(_tg_bind_codes) - _MAX_BIND_CODES
+    oldest_codes = sorted(
+        _tg_bind_codes.items(),
+        key=lambda item: float(item[1].get('created_at', 0.0))
+    )[:overflow]
+    for code, _ in oldest_codes:
+        _tg_bind_codes.pop(code, None)
 
 
 def _get_register_bind_telegram_id(bind_code: str) -> int | None:
@@ -1090,8 +1116,9 @@ def _get_register_bind_telegram_id(bind_code: str) -> int | None:
     return code_info.get('confirmed_telegram_id')
 
 def _generate_bind_code() -> str:
-    """生成 6 位数字绑定码"""
-    return ''.join(_secrets.choice(_string.digits) for _ in range(6))
+    """生成 8 位高强度绑定码（大写字母+数字）。"""
+    alphabet = _string.ascii_uppercase + _string.digits
+    return ''.join(_secrets.choice(alphabet) for _ in range(8))
 
 
 @users_bp.route('/me/telegram/bind-code', methods=['POST'])
@@ -1124,6 +1151,8 @@ async def generate_tg_bind_code():
     
     # 清理过期绑定码
     _cleanup_expired_codes()
+    if len(_tg_bind_codes) >= _MAX_BIND_CODES:
+        return api_response(False, "系统繁忙，请稍后重试", code=503)
     
     # 撤销该用户之前未使用的绑定码
     old_codes = [k for k, v in _tg_bind_codes.items() if v['uid'] == user.UID]
@@ -1160,6 +1189,8 @@ async def generate_tg_register_bind_code():
 
     # 清理过期绑定码
     _cleanup_expired_codes()
+    if len(_tg_bind_codes) >= _MAX_BIND_CODES:
+        return api_response(False, "系统繁忙，请稍后重试", code=503)
 
     # 生成新绑定码（确保不重复）
     code = _generate_bind_code()
@@ -1191,14 +1222,14 @@ async def confirm_tg_bind():
         }
     """
     data = request.get_json() or {}
-    bind_code = data.get('bind_code', '').strip()
+    bind_code = data.get('bind_code', '').strip().upper()
     telegram_id = data.get('telegram_id')
     bot_secret = data.get('bot_secret', '')
     
     # 验证 Bot 身份
-    from src.config import TelegramConfig
-    expected_secret = TelegramConfig.BOT_TOKEN[:20] if TelegramConfig.BOT_TOKEN else ''
-    if not bot_secret or bot_secret != expected_secret:
+    from src.config import SecurityConfig
+    expected_secret = (SecurityConfig.BOT_INTERNAL_SECRET or '').strip()
+    if not bot_secret or not expected_secret or not hmac.compare_digest(str(bot_secret), str(expected_secret)):
         return api_response(False, "未授权", code=403)
     
     if not bind_code or not telegram_id:
@@ -1603,7 +1634,6 @@ async def upload_background_image():
     import os
     import uuid
     from pathlib import Path
-    from werkzeug.utils import secure_filename
     from flask import current_app
     
     # 检查认证
@@ -1625,23 +1655,11 @@ async def upload_background_image():
     if bg_type not in ['light', 'dark']:
         return api_response(False, "背景类型必须为 'light' 或 'dark'", code=400)
     
-    # 验证文件类型（扩展名 + magic bytes）
-    ALLOWED_EXTENSIONS = {'jpg', 'jpeg', 'png', 'gif', 'webp'}
-    if not file.filename.lower().endswith(tuple('.' + ext for ext in ALLOWED_EXTENSIONS)):
-        return api_response(False, f"只支持图片格式: {', '.join(ALLOWED_EXTENSIONS)}", code=400)
-    
-    # 读取文件头校验 magic bytes
-    header = file.read(16)
+    # 读取文件头并识别图片类型
+    header = file.read(32)
     file.seek(0)
-    IMAGE_SIGNATURES = {
-        b'\xff\xd8\xff': 'jpg',     # JPEG
-        b'\x89PNG\r\n': 'png',      # PNG
-        b'GIF87a': 'gif',           # GIF87a
-        b'GIF89a': 'gif',           # GIF89a
-        b'RIFF': 'webp',           # WebP (RIFF header)
-    }
-    is_valid_image = any(header.startswith(sig) for sig in IMAGE_SIGNATURES)
-    if not is_valid_image:
+    detected_ext = _detect_image_extension(header)
+    if not detected_ext:
         return api_response(False, "文件内容不是有效的图片", code=400)
     
     # 验证文件大小
@@ -1659,8 +1677,7 @@ async def upload_background_image():
         os.makedirs(upload_dir, exist_ok=True)
         
         # 生成唯一文件名
-        ext = Path(file.filename).suffix.lower()
-        filename = f"{uuid.uuid4().hex}{ext}"
+        filename = f"{uuid.uuid4().hex}.{detected_ext}"
         filepath = os.path.join(upload_dir, filename)
         
         # 保存文件
@@ -1737,18 +1754,11 @@ async def upload_avatar():
         if file.content_type not in allowed_types:
             return api_response(False, "只支持 JPG、PNG、GIF、WebP 格式的图片", code=400)
         
-        # 读取文件头校验 magic bytes
-        header = file.read(16)
+        # 读取文件头并识别图片类型
+        header = file.read(32)
         file.seek(0)
-        IMAGE_SIGNATURES = {
-            b'\xff\xd8\xff': 'jpg',     # JPEG
-            b'\x89PNG\r\n': 'png',      # PNG
-            b'GIF87a': 'gif',           # GIF87a
-            b'GIF89a': 'gif',           # GIF89a
-            b'RIFF': 'webp',           # WebP (RIFF header)
-        }
-        is_valid_image = any(header.startswith(sig) for sig in IMAGE_SIGNATURES)
-        if not is_valid_image:
+        detected_ext = _detect_image_extension(header)
+        if not detected_ext:
             return api_response(False, "文件内容不是有效的图片", code=400)
         
         # 验证文件大小
@@ -1764,8 +1774,7 @@ async def upload_avatar():
         os.makedirs(upload_dir, exist_ok=True)
         
         # 生成唯一文件名
-        ext = Path(file.filename).suffix.lower()
-        filename = f"{uuid.uuid4().hex}{ext}"
+        filename = f"{uuid.uuid4().hex}.{detected_ext}"
         filepath = os.path.join(upload_dir, filename)
         
         # 保存文件

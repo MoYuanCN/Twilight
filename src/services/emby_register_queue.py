@@ -128,6 +128,18 @@ class EmbyRegisterQueueService:
 
         username_key = username.lower()
 
+        # 先做一次无锁快速检查，降低高并发下全局状态锁竞争。
+        current_count = await UserService.get_registered_user_count()
+        existing_tg = await UserOperate.get_user_by_telegram_id(telegram_id)
+        if existing_tg and existing_tg.EMBYID:
+            return None, "该 Telegram 账号已绑定 Emby 账户"
+
+        existing_name = await UserOperate.get_user_by_username(username)
+        if existing_name and existing_name.EMBYID:
+            return None, "该用户名已被占用"
+        if existing_name and existing_name.TELEGRAM_ID and existing_name.TELEGRAM_ID != telegram_id:
+            return None, "该用户名已被占用"
+
         async with cls._state_lock:
             await cls._cleanup_expired_status_locked()
 
@@ -149,24 +161,14 @@ class EmbyRegisterQueueService:
                 return None, "注册请求过多，请稍后再试"
 
             # 快速容量检查：已注册人数 + 排队中人数不超过上限
-            current_count = await UserService.get_registered_user_count()
             pending_count = len(cls._pending_by_username)
             if current_count + pending_count >= ScoreAndRegisterConfig.USER_LIMIT:
                 return None, f"已达到用户数量上限 ({ScoreAndRegisterConfig.USER_LIMIT})"
 
-            existing_tg = await UserOperate.get_user_by_telegram_id(telegram_id)
-            if existing_tg and existing_tg.EMBYID:
-                return None, "该 Telegram 账号已绑定 Emby 账户"
-
-            existing_name = await UserOperate.get_user_by_username(username)
-            if existing_name and existing_name.EMBYID:
-                return None, "该用户名已被占用"
-            if existing_name and existing_name.TELEGRAM_ID and existing_name.TELEGRAM_ID != telegram_id:
-                return None, "该用户名已被占用"
-
             request_id = f"erq_{secrets.token_hex(8)}"
             status_token = secrets.token_urlsafe(20)
             now = cls._now()
+            queue_position = cls._queue.qsize() + 1
             task = _QueueTask(
                 request_id=request_id,
                 status_token=status_token,
@@ -188,7 +190,7 @@ class EmbyRegisterQueueService:
                 "telegram_id": telegram_id,
                 "username": username,
                 "message": "已进入注册队列，等待处理",
-                "queue_position": cls._queue.qsize() + 1,
+                "queue_position": queue_position,
             }
 
             cls._queue.put_nowait(task)
@@ -197,7 +199,7 @@ class EmbyRegisterQueueService:
                 "request_id": request_id,
                 "status_token": status_token,
                 "status": "queued",
-                "queue_position": cls._queue.qsize(),
+                "queue_position": queue_position,
                 "reused": False,
             }, "已加入 Emby 注册队列"
 
@@ -264,6 +266,7 @@ class EmbyRegisterQueueService:
 
             item["status"] = "success"
             item["updated_at"] = now
+            item["finished_at"] = now
             item["message"] = result.message
             item["queue_position"] = None
             item["data"] = {
@@ -285,6 +288,7 @@ class EmbyRegisterQueueService:
 
             item["status"] = "failed"
             item["updated_at"] = now
+            item["finished_at"] = now
             item["message"] = message
             item["queue_position"] = None
 

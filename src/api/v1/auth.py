@@ -29,10 +29,39 @@ auth_bp = Blueprint('auth', __name__, url_prefix='/auth')
 # token 存储：优先使用 Redis，未配置时回退内存（单进程有效）
 _token_store: dict[str, dict] = {}
 _redis_client: Optional["Redis"] = None
+_MAX_INMEMORY_TOKENS = 100000
+_AUTH_COOKIE_NAME = "twilight_session"
 
 # 登录速率限制：IP -> (失败次数, 首次失败时间戳)
 _login_rate_limit: dict[str, dict] = defaultdict(lambda: {'count': 0, 'first_fail': 0})
-_LOGIN_RATE_WINDOW = 900  # 15 分钟窗口
+_MAX_TRACKED_LOGIN_IPS = 50000
+
+
+def _login_rate_window() -> int:
+    """登录限流窗口（秒），跟随配置 lockout_minutes。"""
+    return max(60, int(SecurityConfig.LOCKOUT_MINUTES or 15) * 60)
+
+
+def _cleanup_login_rate_limit(now: int) -> None:
+    """清理过期与低价值记录，防止 IP 字典无限增长。"""
+    window = _login_rate_window()
+    stale_ips = [
+        ip for ip, rec in _login_rate_limit.items()
+        if now - int(rec.get('first_fail', 0) or 0) > window
+    ]
+    for ip in stale_ips:
+        _login_rate_limit.pop(ip, None)
+
+    if len(_login_rate_limit) <= _MAX_TRACKED_LOGIN_IPS:
+        return
+
+    overflow = len(_login_rate_limit) - _MAX_TRACKED_LOGIN_IPS
+    sorted_items = sorted(
+        _login_rate_limit.items(),
+        key=lambda item: int(item[1].get('first_fail', 0) or 0)
+    )
+    for ip, _ in sorted_items[:overflow]:
+        _login_rate_limit.pop(ip, None)
 
 
 def _check_login_rate_limit(ip: str) -> Optional[str]:
@@ -46,16 +75,18 @@ def _check_login_rate_limit(ip: str) -> Optional[str]:
         return None
     
     now = timestamp()
+    _cleanup_login_rate_limit(now)
+    window = _login_rate_window()
     record = _login_rate_limit[ip]
     
     # 窗口过期则重置
-    if now - record['first_fail'] > _LOGIN_RATE_WINDOW:
+    if now - record['first_fail'] > window:
         record['count'] = 0
         record['first_fail'] = 0
         return None
     
     if record['count'] >= threshold:
-        remaining = _LOGIN_RATE_WINDOW - (now - record['first_fail'])
+        remaining = window - (now - record['first_fail'])
         return f"登录尝试过于频繁，请在 {max(remaining // 60, 1)} 分钟后重试"
     
     return None
@@ -64,8 +95,10 @@ def _check_login_rate_limit(ip: str) -> Optional[str]:
 def _record_login_failure(ip: str):
     """记录一次登录失败"""
     now = timestamp()
+    _cleanup_login_rate_limit(now)
+    window = _login_rate_window()
     record = _login_rate_limit[ip]
-    if record['count'] == 0 or now - record['first_fail'] > _LOGIN_RATE_WINDOW:
+    if record['count'] == 0 or now - record['first_fail'] > window:
         record['count'] = 1
         record['first_fail'] = now
     else:
@@ -107,6 +140,59 @@ def _user_tokens_key(uid: int) -> str:
     return f"tw:user:{uid}:tokens"
 
 
+def _set_auth_cookie(response, token: str) -> None:
+    """写入 HttpOnly 会话 Cookie。"""
+    cookie_name = (APIConfig.SESSION_COOKIE_NAME or _AUTH_COOKIE_NAME).strip() or _AUTH_COOKIE_NAME
+    response.set_cookie(
+        cookie_name,
+        token,
+        max_age=APIConfig.TOKEN_EXPIRE,
+        httponly=True,
+        secure=bool(APIConfig.SESSION_COOKIE_SECURE),
+        samesite=APIConfig.SESSION_COOKIE_SAMESITE,
+        domain=(APIConfig.SESSION_COOKIE_DOMAIN or None),
+        path=APIConfig.SESSION_COOKIE_PATH or '/',
+    )
+
+
+def _clear_auth_cookie(response) -> None:
+    """清理会话 Cookie。"""
+    cookie_name = (APIConfig.SESSION_COOKIE_NAME or _AUTH_COOKIE_NAME).strip() or _AUTH_COOKIE_NAME
+    response.set_cookie(
+        cookie_name,
+        '',
+        max_age=0,
+        expires=0,
+        httponly=True,
+        secure=bool(APIConfig.SESSION_COOKIE_SECURE),
+        samesite=APIConfig.SESSION_COOKIE_SAMESITE,
+        domain=(APIConfig.SESSION_COOKIE_DOMAIN or None),
+        path=APIConfig.SESSION_COOKIE_PATH or '/',
+    )
+
+
+def _cleanup_inmemory_tokens() -> None:
+    """清理内存 token：删除过期项并控制最大容量。"""
+    if not _token_store:
+        return
+
+    now = timestamp()
+    expired = [tk for tk, data in _token_store.items() if now > int(data.get('expires_at', 0) or 0)]
+    for tk in expired:
+        _token_store.pop(tk, None)
+
+    if len(_token_store) <= _MAX_INMEMORY_TOKENS:
+        return
+
+    overflow = len(_token_store) - _MAX_INMEMORY_TOKENS
+    oldest = sorted(
+        _token_store.items(),
+        key=lambda item: int(item[1].get('created_at', 0) or 0)
+    )[:overflow]
+    for tk, _ in oldest:
+        _token_store.pop(tk, None)
+
+
 async def _get_redis() -> Optional["Redis"]:
     """延迟初始化 Redis 客户端，未配置时返回 None。"""
     global _redis_client
@@ -137,14 +223,16 @@ async def _load_token(token: str) -> Optional[dict]:
             return None
         except Exception as exc:  # pragma: no cover - redis 挂掉时回退
             logger.warning("Redis token store 读取失败，回退内存：%s", exc)
+    _cleanup_inmemory_tokens()
     return _token_store.get(token)
 
 
 async def _store_token(token: str, uid: int) -> dict:
+    now = timestamp()
     payload = {
         'uid': uid,
-        'created_at': timestamp(),
-        'expires_at': timestamp() + APIConfig.TOKEN_EXPIRE,
+        'created_at': now,
+        'expires_at': now + APIConfig.TOKEN_EXPIRE,
     }
     redis_client = await _get_redis()
     if redis_client:
@@ -161,6 +249,7 @@ async def _store_token(token: str, uid: int) -> dict:
             return payload
     else:
         _token_store[token] = payload
+        _cleanup_inmemory_tokens()
     return payload
 
 def require_auth(f: Callable) -> Callable:
@@ -169,12 +258,15 @@ def require_auth(f: Callable) -> Callable:
     async def wrapper(*args, **kwargs):
         # 从请求头获取 token
         auth_header = request.headers.get('Authorization', '')
+        token = ''
+        if auth_header and auth_header.startswith('Bearer '):
+            token = auth_header[7:]
+        else:
+            cookie_name = (APIConfig.SESSION_COOKIE_NAME or _AUTH_COOKIE_NAME).strip() or _AUTH_COOKIE_NAME
+            token = (request.cookies.get(cookie_name) or '').strip()
 
-        # 必须提供 Bearer Token
-        if not auth_header or not auth_header.startswith('Bearer '):
+        if not token:
             return api_response(False, "需要认证", code=401)
-        
-        token = auth_header[7:]  # 移除 "Bearer " 前缀
         
         # 验证 token 格式（应该是 64 位十六进制字符串）
         if len(token) != 64 or not all(c in '0123456789abcdef' for c in token):
@@ -374,10 +466,11 @@ async def login():
     except:
         pass
     
-    return api_response(True, "登录成功", {
-        'token': token,
+    response, code = api_response(True, "登录成功", {
         'user': basic_user_info,
     })
+    _set_auth_cookie(response, token)
+    return response, code
 
 
 @auth_bp.route('/login/telegram', methods=['POST'])
@@ -390,6 +483,9 @@ async def login_telegram():
             "telegram_id": 123456789
         }
     """
+    if not SecurityConfig.TELEGRAM_DIRECT_LOGIN_ENABLED:
+        return api_response(False, "Telegram 直登已禁用，请使用用户名密码登录", code=403)
+
     # IP 速率限制检查
     client_ip = request.remote_addr or 'unknown'
     rate_limit_msg = _check_login_rate_limit(client_ip)
@@ -444,10 +540,11 @@ async def login_telegram():
     # 获取用户信息
     user_info = await UserService.get_user_info(user)
     
-    return api_response(True, "登录成功", {
-        'token': token,
+    response, code = api_response(True, "登录成功", {
         'user': user_info,
     })
+    _set_auth_cookie(response, token)
+    return response, code
 
 
 @auth_bp.route('/login/apikey', methods=['POST'])
@@ -460,6 +557,9 @@ async def login_apikey():
             "apikey": "key-xxxxx-xxxxx"
         }
     """
+    if not SecurityConfig.APIKEY_DIRECT_LOGIN_ENABLED:
+        return api_response(False, "API Key 直登已禁用，请使用标准登录流程", code=403)
+
     # IP 速率限制检查
     client_ip = request.remote_addr or 'unknown'
     rate_limit_msg = _check_login_rate_limit(client_ip)
@@ -492,10 +592,11 @@ async def login_apikey():
     from src.services import UserService
     user_info = await UserService.get_user_info(user)
     
-    return api_response(True, "验证成功", {
-        'token': token,
+    response, code = api_response(True, "验证成功", {
         'user': user_info,
     })
+    _set_auth_cookie(response, token)
+    return response, code
 
 
 # ==================== 登出相关 ====================
@@ -505,7 +606,9 @@ async def login_apikey():
 async def logout():
     """登出当前设备"""
     await revoke_token(g.token, getattr(g.current_user, 'UID', None))
-    return api_response(True, "登出成功")
+    response, code = api_response(True, "登出成功")
+    _clear_auth_cookie(response)
+    return response, code
 
 
 @auth_bp.route('/logout/all', methods=['POST'])
@@ -513,7 +616,9 @@ async def logout():
 async def logout_all():
     """登出所有设备"""
     await revoke_user_tokens(g.current_user.UID)
-    return api_response(True, "已登出所有设备")
+    response, code = api_response(True, "已登出所有设备")
+    _clear_auth_cookie(response)
+    return response, code
 
 
 # ==================== 用户信息 ====================
@@ -539,9 +644,9 @@ async def refresh_token():
     # 生成新 token
     new_token = await generate_token(g.current_user.UID)
     
-    return api_response(True, "刷新成功", {
-        'token': new_token,
-    })
+    response, code = api_response(True, "刷新成功")
+    _set_auth_cookie(response, new_token)
+    return response, code
 
 
 # ==================== API Key 管理 ====================
@@ -550,9 +655,10 @@ async def refresh_token():
 @require_auth
 async def get_apikey_status():
     """获取 API Key 状态"""
+    key_exists = bool(g.current_user.APIKEY)
     return api_response(True, "获取成功", {
-        'enabled': g.current_user.APIKEY_STATUS,
-        'apikey': g.current_user.APIKEY if g.current_user.APIKEY_STATUS else None,
+        'enabled': bool(g.current_user.APIKEY_STATUS),
+        'has_key': key_exists,
     })
 
 
@@ -582,21 +688,12 @@ async def disable_apikey():
 @auth_bp.route('/apikey/enable', methods=['POST'])
 @require_auth
 async def enable_apikey():
-    """启用 API Key（如果不存在则生成）"""
-    if not g.current_user.APIKEY or not g.current_user.APIKEY_STATUS:
-        # 生成新的 API Key
-        new_apikey = await UserOperate.reset_apikey(g.current_user)
-        return api_response(True, "API Key 已生成并启用", {
-            'apikey': new_apikey,
-            'enabled': True,
-        })
-    else:
-        # 启用现有的 API Key
-        await UserOperate.set_apikey_status(g.current_user.UID, True)
-        return api_response(True, "API Key 已启用", {
-            'apikey': g.current_user.APIKEY,
-            'enabled': True,
-        })
+    """启用 API Key（强制旋转新 key）"""
+    new_apikey = await UserOperate.reset_apikey(g.current_user)
+    return api_response(True, "API Key 已生成并启用", {
+        'apikey': new_apikey,
+        'enabled': True,
+    })
 
 
 @auth_bp.route('/apikey/permissions', methods=['GET'])

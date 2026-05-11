@@ -89,6 +89,9 @@ from src.services.admin_service import (
 from src.services.auto_renew_service import (
     AutoRenewService,
 )
+from src.services.emby_register_queue import (
+    EmbyRegisterQueueService,
+)
 __all__ = [
     # Emby API 客户端
     'EmbyClient',
@@ -160,4 +163,6 @@ __all__ = [
     'ReminderService',
     # 自动续期
     'AutoRenewService',
+    # Emby 自由注册队列
+    'EmbyRegisterQueueService',
 ]

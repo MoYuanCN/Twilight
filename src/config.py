@@ -281,6 +281,11 @@ class ScoreAndRegisterConfig(BaseConfig):
     PENDING_REGISTER_BONUS: int = 10  # 无码注册赠送的初始积分
     ALLOW_NO_EMBY_CHECKIN: bool = True  # 是否允许无 Emby 账户的用户签到
     ALLOW_NO_EMBY_VIEW: bool = True  # 是否允许无 Emby 账户的用户查看部分信息
+    EMBY_DIRECT_REGISTER_ENABLED: bool = False  # 是否开启 Emby 自由注册
+    EMBY_DIRECT_REGISTER_DAYS: int = 30  # Emby 自由注册默认开通天数
+    EMBY_DIRECT_REGISTER_WORKERS: int = 8  # Emby 自由注册队列 worker 数
+    EMBY_DIRECT_REGISTER_MAX_QUEUE: int = 1000  # Emby 自由注册队列最大排队数
+    EMBY_DIRECT_REGISTER_STATUS_TTL: int = 1800  # Emby 自由注册状态保留秒数
     
     # 管理员配置（二选一，优先使用 UID）
     ADMIN_UIDS: str = ''  # 管理员 UID 列表，逗号分隔（推荐，如 "1,2,3"）
@@ -348,6 +353,11 @@ class APIConfig(BaseConfig):
     CORS_ORIGINS: List[str] = []
     UPLOAD_FOLDER: str = str(ROOT_PATH / 'uploads')  # 文件上传目录
     MAX_UPLOAD_SIZE: int = 5 * 1024 * 1024  # 最大上传文件大小（字节）
+    SESSION_COOKIE_NAME: str = 'twilight_session'
+    SESSION_COOKIE_SECURE: bool = False
+    SESSION_COOKIE_SAMESITE: str = 'Lax'  # Strict / Lax / None
+    SESSION_COOKIE_DOMAIN: str = ''
+    SESSION_COOKIE_PATH: str = '/'
 
 
 class SecurityConfig(BaseConfig):
@@ -357,6 +367,9 @@ class SecurityConfig(BaseConfig):
     LOGIN_FAIL_THRESHOLD: int = 5  # 登录失败锁定阈值
     LOCKOUT_MINUTES: int = 30  # 锁定时间
     LOG_ALL_LOGINS: bool = True  # 是否记录所有登录
+    TELEGRAM_DIRECT_LOGIN_ENABLED: bool = False  # 是否允许仅凭 telegram_id 直接登录
+    APIKEY_DIRECT_LOGIN_ENABLED: bool = False  # 是否允许通过 API Key 直接换取完整会话 token
+    BOT_INTERNAL_SECRET: str = ''  # Bot 调用内部接口的密钥（建议显式配置）
 
 
 class SchedulerConfig(BaseConfig):
@@ -375,7 +388,6 @@ class NotificationConfig(BaseConfig):
     """通知配置"""
     ENABLED: bool = True
     EXPIRY_REMIND_DAYS: int = 3
-    DAILY_RANKING_TIME: str = ""
     NEW_MEDIA_NOTIFY: bool = False
 
 

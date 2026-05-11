@@ -8,7 +8,7 @@ interface AuthState {
   isLoading: boolean;
   initialize: () => Promise<void>;
   login: (username: string, password: string) => Promise<boolean>;
-  logout: () => void;
+  logout: () => Promise<void>;
   fetchUser: (options?: { silent?: boolean }) => Promise<void>;
   setUser: (user: UserInfo | null) => void;
 }
@@ -21,10 +21,7 @@ export const useAuthStore = create<AuthState>()(
       isLoading: true,
 
       initialize: async () => {
-        if (!api.hasToken()) {
-          set({ user: null, isAuthenticated: false, isLoading: false });
-          return;
-        }
+        // Cookie 会话模式：始终向后端探测当前会话
         await get().fetchUser();
       },
 
@@ -63,8 +60,8 @@ export const useAuthStore = create<AuthState>()(
         }
       },
 
-      logout: () => {
-        api.logout();
+      logout: async () => {
+        await api.logout();
         set({ user: null, isAuthenticated: false, isLoading: false });
       },
 

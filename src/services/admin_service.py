@@ -9,10 +9,11 @@ import logging
 from io import StringIO
 from typing import List, Dict, Any, Tuple, Optional
 from datetime import datetime
+from sqlalchemy import select, func
 
 from src.db.user import UserOperate, UserModel, Role
 from src.db.score import ScoreOperate
-from src.db.playback import PlaybackOperate, DailyStatsOperate
+from src.db.playback import PlaybackOperate, DailyStatsOperate, PlaybackSessionFactory, PlaybackModel
 from src.services.emby import get_emby_client
 from src.services.user_service import UserService
 from src.core.utils import timestamp, format_duration, days_to_seconds
@@ -303,25 +304,38 @@ class DataExportService:
     
     @classmethod
     async def export_playback_stats_csv(cls, days: int = 30) -> str:
-        """导出播放统计为 CSV"""
+        """导出播放统计为 CSV。"""
         output = StringIO()
         
-        fields = ['UID', '用户名', '播放时长', '播放次数', '排名']
+        fields = ['UID', '用户名', '播放时长', '播放次数']
         writer = csv.DictWriter(output, fieldnames=fields)
         writer.writeheader()
-        
-        # 获取排行榜数据
-        start_time = timestamp() - days * 86400 if days > 0 else None
-        ranking = await PlaybackOperate.get_play_ranking(start_time=start_time, limit=1000)
-        
-        for i, item in enumerate(ranking, 1):
-            user = await UserOperate.get_user_by_uid(item['uid'])
+
+        users, _ = await UserOperate.get_all_users(limit=10000)
+        username_map = {user.UID: user.USERNAME for user in users}
+
+        async with PlaybackSessionFactory() as session:
+            query = (
+                select(
+                    PlaybackModel.UID.label('uid'),
+                    func.coalesce(func.sum(PlaybackModel.DURATION), 0).label('total_duration'),
+                    func.count().label('play_count'),
+                )
+                .group_by(PlaybackModel.UID)
+            )
+
+            if days > 0:
+                start_time = timestamp() - days * 86400
+                query = query.where(PlaybackModel.START_TIME >= start_time)
+
+            rows = (await session.execute(query)).all()
+
+        for item in sorted(rows, key=lambda row: int(row.uid)):
             writer.writerow({
-                'UID': item['uid'],
-                '用户名': user.USERNAME if user else '未知',
-                '播放时长': format_duration(item['total']),
-                '播放次数': item['total'],
-                '排名': i,
+                'UID': item.uid,
+                '用户名': username_map.get(item.uid, '未知'),
+                '播放时长': format_duration(int(item.total_duration or 0)),
+                '播放次数': int(item.play_count or 0),
             })
         
         return output.getvalue()
@@ -368,41 +382,24 @@ class WatchHistoryService:
     
     @classmethod
     async def get_global_watch_stats(cls, days: int = 7) -> Dict[str, Any]:
-        """获取全站观看统计"""
+        """获取全站观看统计。"""
         start_time = timestamp() - days * 86400
-        
-        # 用户排行
-        user_ranking = await PlaybackOperate.get_play_ranking(
-            start_time=start_time, limit=10, by='duration'
-        )
-        
-        # 媒体排行
-        media_ranking = await PlaybackOperate.get_media_ranking(
-            start_time=start_time, limit=10
-        )
-        
-        # 填充用户名
-        user_ranking_with_names = []
-        for item in user_ranking:
-            user = await UserOperate.get_user_by_uid(item['uid'])
-            user_ranking_with_names.append({
-                'uid': item['uid'],
-                'username': user.USERNAME if user else '未知',
-                'duration': item['total'],
-                'duration_str': format_duration(item['total']),
-            })
-        
+
+        async with PlaybackSessionFactory() as session:
+            count_query = select(func.count()).select_from(PlaybackModel).where(PlaybackModel.START_TIME >= start_time)
+            duration_query = select(func.coalesce(func.sum(PlaybackModel.DURATION), 0)).where(PlaybackModel.START_TIME >= start_time)
+            active_user_query = select(func.count(func.distinct(PlaybackModel.UID))).where(PlaybackModel.START_TIME >= start_time)
+
+            total_play_count = (await session.execute(count_query)).scalar_one() or 0
+            total_duration = (await session.execute(duration_query)).scalar_one() or 0
+            active_user_count = (await session.execute(active_user_query)).scalar_one() or 0
+
         return {
             'period_days': days,
-            'user_ranking': user_ranking_with_names,
-            'media_ranking': [{
-                'item_id': m['item_id'],
-                'item_name': m['item_name'],
-                'item_type': m['item_type'],
-                'play_count': m['play_count'],
-                'total_duration': m['total_duration'],
-                'total_duration_str': format_duration(m['total_duration'] or 0),
-            } for m in media_ranking],
+            'total_play_count': total_play_count,
+            'total_duration': total_duration,
+            'total_duration_str': format_duration(total_duration),
+            'active_user_count': active_user_count,
         }
 
 

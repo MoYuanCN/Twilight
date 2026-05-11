@@ -18,8 +18,6 @@ function isAbortError(error: unknown): boolean {
 }
 
 class ApiClient {
-  private token: string | null = null;
-
   private normalizeRequestStatus(status?: string | null, mode: "user" | "admin" = "user"): string {
     const raw = (status || "").trim().toLowerCase();
     if (mode === "admin") {
@@ -66,41 +64,25 @@ class ApiClient {
   }
 
   setToken(token: string | null) {
-    this.token = token;
-    if (typeof window !== "undefined") {
-      if (token) {
-        localStorage.setItem("twilight_token", token);
-      } else {
-        localStorage.removeItem("twilight_token");
-      }
-    }
+    void token;
   }
 
   getToken(): string | null {
-    if (this.token) return this.token;
-    if (typeof window !== "undefined") {
-      this.token = localStorage.getItem("twilight_token");
-    }
-    return this.token;
+    return null;
   }
 
   hasToken(): boolean {
-    return !!this.getToken();
+    return true;
   }
 
   private async request<T>(
     endpoint: string,
     options: RequestInit = {}
   ): Promise<ApiResponse<T>> {
-    const token = this.getToken();
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
       ...((options.headers as Record<string, string>) || {}),
     };
-
-    if (token) {
-      headers["Authorization"] = `Bearer ${token}`;
-    }
 
     const url = `${API_BASE}/api/v1${endpoint}`;
     
@@ -109,6 +91,7 @@ class ApiClient {
       response = await fetch(url, {
         ...options,
         headers,
+        credentials: "include",
       });
     } catch (error) {
       if (isAbortError(error)) {
@@ -171,12 +154,7 @@ class ApiClient {
     formData: FormData,
     method: "POST" | "PUT" = "POST"
   ): Promise<ApiResponse<T>> {
-    const token = this.getToken();
     const headers: Record<string, string> = {};
-
-    if (token) {
-      headers["Authorization"] = `Bearer ${token}`;
-    }
 
     const url = `${API_BASE}/api/v1${endpoint}`;
 
@@ -186,6 +164,7 @@ class ApiClient {
         method,
         headers,
         body: formData,
+        credentials: "include",
       });
     } catch (error) {
       console.error("Network error:", error);
@@ -208,15 +187,12 @@ class ApiClient {
 
   // Auth
   async login(username: string, password: string) {
-    const res = await this.request<{ token: string; user: Partial<UserInfo> }>("/auth/login", {
+    const res = await this.request<{ user: Partial<UserInfo> }>("/auth/login", {
       method: "POST",
       body: JSON.stringify({ username, password }),
     });
     if (res.success && res.data?.user?.avatar) {
       res.data.user.avatar = this.toAbsoluteAssetUrl(res.data.user.avatar) || undefined;
-    }
-    if (res.success && res.data?.token) {
-      this.setToken(res.data.token);
     }
     return res;
   }
@@ -229,7 +205,11 @@ class ApiClient {
   }
 
   async logout() {
-    this.setToken(null);
+    try {
+      await this.request("/auth/logout", { method: "POST" });
+    } catch {
+      // 忽略网络异常，前端仍会清理本地状态
+    }
   }
 
   // System
@@ -762,7 +742,7 @@ class ApiClient {
   }
 
   async getApiKeyStatus() {
-    return this.request<{ enabled: boolean; apikey: string | null }>("/auth/apikey");
+    return this.request<{ enabled: boolean; has_key: boolean }>("/auth/apikey");
   }
 
   async generateApiKey() {

@@ -1,7 +1,7 @@
 """
 播放记录数据库模块
 
-存储用户播放记录，用于统计排行榜
+存储用户播放记录及日常统计数据
 """
 import time
 from typing import Optional, List
@@ -131,91 +131,6 @@ class PlaybackOperate:
             )
             return result.scalar_one() or 0
     
-    @staticmethod
-    async def get_play_ranking(
-        start_time: int = None,
-        end_time: int = None,
-        limit: int = 10,
-        by: str = 'duration'  # duration 或 count
-    ) -> List[dict]:
-        """
-        获取播放排行榜
-        
-        :param start_time: 开始时间戳
-        :param end_time: 结束时间戳
-        :param limit: 返回数量
-        :param by: 排序方式 (duration=时长, count=次数)
-        """
-        async with PlaybackSessionFactory() as session:
-            # 构建查询
-            if by == 'duration':
-                query = (
-                    select(
-                        PlaybackModel.UID,
-                        func.sum(PlaybackModel.DURATION).label('total')
-                    )
-                    .group_by(PlaybackModel.UID)
-                    .order_by(desc('total'))
-                    .limit(limit)
-                )
-            else:
-                query = (
-                    select(
-                        PlaybackModel.UID,
-                        func.count().label('total')
-                    )
-                    .group_by(PlaybackModel.UID)
-                    .order_by(desc('total'))
-                    .limit(limit)
-                )
-            
-            # 添加时间筛选
-            if start_time:
-                query = query.filter(PlaybackModel.START_TIME >= start_time)
-            if end_time:
-                query = query.filter(PlaybackModel.START_TIME <= end_time)
-            
-            result = await session.execute(query)
-            
-            return [{'uid': row[0], 'total': row[1]} for row in result.all()]
-    
-    @staticmethod
-    async def get_media_ranking(
-        start_time: int = None,
-        end_time: int = None,
-        limit: int = 10
-    ) -> List[dict]:
-        """获取媒体播放排行"""
-        async with PlaybackSessionFactory() as session:
-            query = (
-                select(
-                    PlaybackModel.ITEM_ID,
-                    PlaybackModel.ITEM_NAME,
-                    PlaybackModel.ITEM_TYPE,
-                    func.count().label('play_count'),
-                    func.sum(PlaybackModel.DURATION).label('total_duration')
-                )
-                .group_by(PlaybackModel.ITEM_ID)
-                .order_by(desc('play_count'))
-                .limit(limit)
-            )
-            
-            if start_time:
-                query = query.filter(PlaybackModel.START_TIME >= start_time)
-            if end_time:
-                query = query.filter(PlaybackModel.START_TIME <= end_time)
-            
-            result = await session.execute(query)
-            
-            return [{
-                'item_id': row[0],
-                'item_name': row[1],
-                'item_type': row[2],
-                'play_count': row[3],
-                'total_duration': row[4],
-            } for row in result.all()]
-
-
 class DailyStatsOperate:
     """每日统计操作"""
     
@@ -251,21 +166,3 @@ class DailyStatsOperate:
                         UNIQUE_ITEMS=items
                     ))
     
-    @staticmethod
-    async def get_daily_ranking(date: str, limit: int = 10) -> List[dict]:
-        """获取日榜"""
-        async with PlaybackSessionFactory() as session:
-            result = await session.execute(
-                select(DailyStatsModel)
-                .filter_by(DATE=date)
-                .order_by(desc(DailyStatsModel.PLAY_DURATION))
-                .limit(limit)
-            )
-            
-            return [{
-                'uid': r.UID,
-                'play_count': r.PLAY_COUNT,
-                'duration': r.PLAY_DURATION,
-                'items': r.UNIQUE_ITEMS,
-            } for r in result.scalars().all()]
-

@@ -44,7 +44,7 @@ API Key 支持细粒度权限控制，部分接口只在特定权限下可用。
 |------|------|
 | `account:read` | 读取账号信息、状态 |
 | `account:write` | 启用 / 禁用 / 续期账号 |
-| `score:read` | 查看积分、排行榜、历史 |
+| `score:read` | 查看积分与历史 |
 | `score:write` | 积分签到与变更 |
 | `emby:read` | 查看 Emby 状态 |
 | `emby:write` | 处理 Emby 会话、NSFW 操作 |
@@ -79,7 +79,6 @@ API Key 支持细粒度权限控制，部分接口只在特定权限下可用。
 | `/score` | `score:read` |
 | `/score/checkin` | `score:write` |
 | `/score/history` | `score:read` |
-| `/score/ranking` | `score:read` |
 | `/emby/nsfw` | `emby:write` |
 | `/use-code` | `account:write` |
 
@@ -309,21 +308,6 @@ curl -X POST "https://your-domain.com/api/v1/apikey/score/checkin" \
 
 ```bash
 curl -X GET "https://your-domain.com/api/v1/apikey/score/history?page=1&per_page=20&type=checkin" \
-  -H "X-API-Key: key-xxxxxxxxxxxxxxxx-yyyyyyyy"
-```
-
-#### 获取积分排行
-
-`GET /api/v1/apikey/score/ranking?limit=10`
-
-- 认证：API Key
-- 请求头：
-  - `X-API-Key: key-xxxxxxxxxxxxxxxx-yyyyyyyy`
-- 说明：获取积分排行榜。
-- 示例 cURL：
-
-```bash
-curl -X GET "https://your-domain.com/api/v1/apikey/score/ranking?limit=10" \
   -H "X-API-Key: key-xxxxxxxxxxxxxxxx-yyyyyyyy"
 ```
 

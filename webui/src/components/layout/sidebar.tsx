@@ -211,7 +211,7 @@ export function Sidebar() {
             >
               {currentTheme === "dark" ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}
             </Button>
-            <Button variant="outline" className="h-10" onClick={logout}>
+              <Button variant="outline" className="h-10" onClick={() => void logout()}>
               <LogOut className="h-4 w-4" />
             </Button>
           </div>

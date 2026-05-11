@@ -208,16 +208,6 @@ class ScoreOperate:
             result = await session.execute(select(RedPacketModel).filter_by(STATUS=0))
             return list[RedPacketModel](result.scalars().all())
 
-    @staticmethod
-    async def get_user_score_ranking(limit: int = 10) -> List[ScoreModel]:
-        """获取积分排行榜"""
-        async with ScoreSessionFactory() as session:
-            result = await session.execute(
-                select(ScoreModel).order_by(ScoreModel.SCORE.desc()).limit(limit)
-            )
-            return list[ScoreModel](result.scalars().all())
-
-
 class ScoreHistoryOperate:
     """积分历史操作"""
     

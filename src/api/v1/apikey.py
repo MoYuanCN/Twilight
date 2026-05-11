@@ -510,22 +510,13 @@ async def enable_apikey():
     """
     user = g.current_user
     
-    if not user.APIKEY or not user.APIKEY_STATUS:
-        # 生成新的 API Key
-        new_apikey = await UserOperate.reset_apikey(user)
-        return api_response(True, "API Key 已生成并启用", {
-            'uid': user.UID,
-            'enabled': True,
-            'apikey': new_apikey,
-        })
-    else:
-        # 启用现有的 API Key
-        await UserOperate.set_apikey_status(user.UID, True)
-        return api_response(True, "API Key 已启用", {
-            'uid': user.UID,
-            'enabled': True,
-            'apikey': user.APIKEY,
-        })
+    # 安全策略：启用时始终旋转新 Key，避免泄露后继续可用
+    new_apikey = await UserOperate.reset_apikey(user)
+    return api_response(True, "API Key 已生成并启用", {
+        'uid': user.UID,
+        'enabled': True,
+        'apikey': new_apikey,
+    })
 
 
 # ==================== Emby 相关 ====================

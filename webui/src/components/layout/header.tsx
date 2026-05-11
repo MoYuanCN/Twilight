@@ -84,7 +84,7 @@ export function Header() {
                   className="h-11 w-full"
                   onClick={() => {
                     setMobileOpen(false);
-                    logout();
+                    void logout();
                   }}
                 >
                   退出登录

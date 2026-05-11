@@ -129,6 +129,18 @@ allow_no_emby_checkin = true
 # 是否允许无 Emby 账户用户查看部分内容
 allow_no_emby_view = true
 
+# ---- Emby 自由注册 ----
+# 是否开启 Emby 自由注册
+emby_direct_register_enabled = false
+# Emby 自由注册默认开通天数
+emby_direct_register_days = 30
+# Emby 自由注册队列 worker 数
+emby_direct_register_workers = 8
+# Emby 自由注册队列最大排队数
+emby_direct_register_max_queue = 1000
+# 注册完成状态保留时长（秒）
+emby_direct_register_status_ttl = 1800
+
 # ---- 管理员 / 白名单 ----
 admin_uids = "1"
 admin_usernames = ""
@@ -200,13 +212,18 @@ token_expire = 864000
 api_key_length = 32
 # 是否启用 CORS 跨域
 cors_enabled = true
-# 允许的跨域来源（空 = 允许所有，生产环境建议限制为前端域名）
-# 示例: ["https://your-domain.com"]
-cors_origins = []
+# 允许的跨域来源（生产环境必须配置为前端域名白名单）
+cors_origins = ["https://your-domain.com"]
 # 文件上传目录（相对于项目根目录或绝对路径）
 # upload_folder = "uploads"
 # 最大上传文件大小（字节，默认 5MB）
 # max_upload_size = 5242880
+# 会话 Cookie 配置
+session_cookie_name = "twilight_session"
+session_cookie_secure = true
+session_cookie_samesite = "Strict"
+session_cookie_domain = ""
+session_cookie_path = "/"
 
 # ===================================================================
 [Security]
@@ -221,6 +238,12 @@ login_fail_threshold = 5
 lockout_minutes = 30
 # 是否记录所有登录日志
 log_all_logins = true
+# 是否允许仅凭 telegram_id 直接登录（生产建议关闭）
+telegram_direct_login_enabled = false
+# 是否允许通过 API Key 直接换取完整会话 token（生产建议关闭）
+apikey_direct_login_enabled = false
+# Bot 调用内部接口密钥（必填，需使用高强度随机字符串）
+bot_internal_secret = ""
 
 # ===================================================================
 [Scheduler]
@@ -249,8 +272,6 @@ emby_sync_interval = 6
 enabled = true
 # 到期前几天发送提醒
 expiry_remind_days = 3
-# 每日排行榜推送时间（HH:MM，留空 = 不推送）
-daily_ranking_time = ""
 # 新媒体入库是否通知
 new_media_notify = false
 

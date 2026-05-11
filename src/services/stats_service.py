@@ -1,12 +1,11 @@
 """
 统计服务
 
-播放统计、排行榜等功能
+播放统计相关功能
 参考: https://github.com/berry8838/Sakura_embyboss
 """
-import time
 import logging
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 from datetime import datetime, timedelta
 
 from src.db.playback import PlaybackOperate, DailyStatsOperate, PlaybackModel
@@ -32,21 +31,6 @@ class StatsService:
         target = now.replace(hour=0, minute=0, second=0, microsecond=0)
         target = target - timedelta(days=-offset_days)
         return int(target.timestamp())
-    
-    @staticmethod
-    def _get_week_start() -> int:
-        """获取本周开始时间戳（周一）"""
-        now = datetime.now()
-        monday = now - timedelta(days=now.weekday())
-        monday = monday.replace(hour=0, minute=0, second=0, microsecond=0)
-        return int(monday.timestamp())
-    
-    @staticmethod
-    def _get_month_start() -> int:
-        """获取本月开始时间戳"""
-        now = datetime.now()
-        first_day = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-        return int(first_day.timestamp())
     
     @classmethod
     async def get_user_stats(cls, uid: int) -> Dict[str, Any]:
@@ -84,80 +68,6 @@ class StatsService:
                 'play_count': today_count,
             }
         }
-    
-    @classmethod
-    async def get_ranking(
-        cls,
-        period: str = 'all',  # all, today, week, month
-        by: str = 'duration',
-        limit: int = 10
-    ) -> List[Dict[str, Any]]:
-        """
-        获取排行榜
-        
-        :param period: 时间范围 (all=总榜, today=日榜, week=周榜, month=月榜)
-        :param by: 排序方式 (duration=时长, count=次数)
-        :param limit: 返回数量
-        """
-        start_time = None
-        end_time = None
-        
-        if period == 'today':
-            start_time = cls._get_day_start()
-        elif period == 'week':
-            start_time = cls._get_week_start()
-        elif period == 'month':
-            start_time = cls._get_month_start()
-        
-        ranking_data = await PlaybackOperate.get_play_ranking(
-            start_time=start_time,
-            end_time=end_time,
-            limit=limit,
-            by=by
-        )
-        
-        # 填充用户信息
-        results = []
-        for i, item in enumerate(ranking_data, 1):
-            user = await UserOperate.get_user_by_uid(item['uid'])
-            
-            if by == 'duration':
-                value = item['total']
-                value_str = format_duration(value)
-            else:
-                value = item['total']
-                value_str = f"{value} 次"
-            
-            results.append({
-                'rank': i,
-                'uid': item['uid'],
-                'username': user.USERNAME if user else '未知用户',
-                'value': value,
-                'value_str': value_str,
-            })
-        
-        return results
-    
-    @classmethod
-    async def get_media_ranking(
-        cls,
-        period: str = 'all',
-        limit: int = 10
-    ) -> List[Dict[str, Any]]:
-        """获取媒体播放排行"""
-        start_time = None
-        
-        if period == 'today':
-            start_time = cls._get_day_start()
-        elif period == 'week':
-            start_time = cls._get_week_start()
-        elif period == 'month':
-            start_time = cls._get_month_start()
-        
-        return await PlaybackOperate.get_media_ranking(
-            start_time=start_time,
-            limit=limit
-        )
     
     @classmethod
     async def get_recent_plays(cls, limit: int = 20) -> List[Dict[str, Any]]:

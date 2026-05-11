@@ -36,20 +36,31 @@ def create_app() -> Flask:
     
     # CORS 跨域支持
     if APIConfig.CORS_ENABLED:
-        cors_origins = APIConfig.CORS_ORIGINS if APIConfig.CORS_ORIGINS else "*"
-        if cors_origins == "*":
-            import logging
-            logging.getLogger(__name__).warning(
-                "⚠️ CORS 允许所有来源 (*)，建议在生产环境中配置 cors_origins 白名单"
+        cors_origins = APIConfig.CORS_ORIGINS or []
+        if not cors_origins:
+            if APIConfig.DEBUG:
+                cors_origins = [
+                    "http://localhost:3000",
+                    "http://127.0.0.1:3000",
+                    "http://localhost:5173",
+                    "http://127.0.0.1:5173",
+                ]
+            else:
+                import logging
+                logging.getLogger(__name__).error(
+                    "⚠️ CORS 已启用但未配置 cors_origins，已自动禁用跨域访问"
+                )
+                cors_origins = []
+
+        if cors_origins:
+            CORS(
+                app,
+                resources={r"/api/*": {"origins": cors_origins}},
+                supports_credentials=True,
+                allow_headers=['Content-Type', 'Authorization', 'X-API-Key'],
+                methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+                max_age=3600,
             )
-        CORS(
-            app,
-            resources={r"/api/*": {"origins": cors_origins}},
-            supports_credentials=bool(APIConfig.CORS_ORIGINS),
-            allow_headers=['Content-Type', 'Authorization', 'X-API-Key'],
-            methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-            max_age=3600,
-        )
     
     # 注册旧版 API（兼容）
     app.register_blueprint(api)
@@ -83,6 +94,20 @@ def create_app() -> Flask:
     def api_docs():
         from src.api.swagger_template import SWAGGER_UI_HTML
         return SWAGGER_UI_HTML
+
+    @app.after_request
+    def apply_security_headers(response):
+        # 基础安全响应头
+        response.headers.setdefault('X-Content-Type-Options', 'nosniff')
+        response.headers.setdefault('X-Frame-Options', 'DENY')
+        response.headers.setdefault('Referrer-Policy', 'strict-origin-when-cross-origin')
+
+        # 认证相关接口禁止缓存，避免令牌与敏感响应被浏览器缓存
+        if request.path.startswith('/api/v1/auth'):
+            response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+            response.headers['Pragma'] = 'no-cache'
+            response.headers['Expires'] = '0'
+        return response
     
     # 错误处理
     @app.errorhandler(404)

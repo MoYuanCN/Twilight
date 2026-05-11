@@ -4,6 +4,7 @@
 提供通用的工具函数和装饰器
 """
 import hashlib
+import hmac
 import string
 import time
 import re
@@ -78,14 +79,14 @@ def verify_password(password: str, hashed: str) -> bool:
     if len(parts) == 2:
         salt, _ = parts
         expected = f"{salt}${hashlib.sha256(f'{salt}{password}'.encode()).hexdigest()}"
-        return expected == hashed
+        return hmac.compare_digest(expected, hashed)
         
     # 新格式: salt$iterations$hash (PBKDF2)
     if len(parts) == 3:
         salt, iterations_str, _ = parts
         try:
             iterations = int(iterations_str)
-            return hash_password(password, salt, iterations) == hashed
+            return hmac.compare_digest(hash_password(password, salt, iterations), hashed)
         except ValueError:
             return False
             

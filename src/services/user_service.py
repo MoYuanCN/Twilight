@@ -299,11 +299,6 @@ class UserService:
         if locks is None:
             return RegisterResponse(RegisterResult.ERROR, "当前注册请求较多，请稍后重试")
 
-        global_lock = await acquire_global_registration_lock()
-        if global_lock is None:
-            await release_registration_lock(locks)
-            return RegisterResponse(RegisterResult.ERROR, "当前注册请求较多，请稍后重试")
-
         try:
             available, msg = await UserService.check_registration_available(use_cache=False)
             if not available:
@@ -327,7 +322,6 @@ class UserService:
                 password=password,
             )
         finally:
-            await release_global_registration_lock(global_lock)
             await release_registration_lock(locks)
 
     @staticmethod

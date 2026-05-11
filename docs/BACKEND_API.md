@@ -92,11 +92,11 @@ Authorization: ApiKey <api_key>
 |------|----------|------|
 | Auth | `/auth` | 登录、会话、Token 刷新、API Key 管理 |
 | Users | `/users` | 注册、个人信息、Emby 绑定、续期、设备、Telegram |
-| Score | `/score` | 积分、签到、转账、排行榜、红包 |
+| Score | `/score` | 积分、签到、转账、红包 |
 | Media | `/media` | TMDB/Bangumi 搜索、求片、库存管理 |
 | Emby | `/emby` | Emby 账号状态、库、搜索、会话 |
 | Admin | `/admin` | 管理用户、Emby 同步、注册码、广播 |
-| Stats | `/stats` | 播放统计、排行榜 |
+| Stats | `/stats` | 播放统计 |
 | System | `/system` | 健康、系统信息、配置、路由列表 |
 | API Key | `/apikey` | 外部系统专用 API Key 接口 |
 
@@ -768,20 +768,6 @@ curl -X POST "http://localhost:5000/api/v1/score/transfer" \
   -H "Authorization: Bearer <token>" \
   -H "Content-Type: application/json" \
   -d '{"target_uid":123,"amount":500,"note":"感谢帮忙"}'
-```
-
-### 获取积分排行榜
-
-`GET /score/ranking?limit=20`
-
-- 说明：获取积分排行榜
-- 认证：登录 Token
-
-- 示例 cURL：
-
-```bash
-curl -X GET "http://localhost:5000/api/v1/score/ranking?limit=20" \
-  -H "Authorization: Bearer <token>"
 ```
 
 ### 获取积分规则配置
@@ -1678,45 +1664,6 @@ curl -X GET "http://localhost:5000/api/v1/stats/playback/my" \
 
 ```bash
 curl -X GET "http://localhost:5000/api/v1/stats/user/123" \
-  -H "Authorization: Bearer <token>"
-```
-
-### 用户积分排行榜
-
-`GET /stats/ranking?limit=20`
-
-- 认证：登录 Token
-
-- 示例 cURL：
-
-```bash
-curl -X GET "http://localhost:5000/api/v1/stats/ranking?limit=20" \
-  -H "Authorization: Bearer <token>"
-```
-
-### 媒体排行榜
-
-`GET /stats/ranking/media?limit=20`
-
-- 认证：登录 Token
-
-- 示例 cURL：
-
-```bash
-curl -X GET "http://localhost:5000/api/v1/stats/ranking/media?limit=20" \
-  -H "Authorization: Bearer <token>"
-```
-
-### 日排行榜
-
-`GET /stats/ranking/daily?limit=20`
-
-- 认证：登录 Token
-
-- 示例 cURL：
-
-```bash
-curl -X GET "http://localhost:5000/api/v1/stats/ranking/daily?limit=20" \
   -H "Authorization: Bearer <token>"
 ```
 
