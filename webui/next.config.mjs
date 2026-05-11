@@ -7,10 +7,18 @@ const nextConfig = {
   // 本地开发时将 /api/* 代理到后端（避免跨域）
   // 生产环境通过 NEXT_PUBLIC_API_URL 直连后端
   async rewrites() {
+    const rules = [
+      {
+        source: '/favicon.ico',
+        destination: '/favicon.svg',
+      },
+    ];
+
     // 仅当未设置 NEXT_PUBLIC_API_URL 时启用代理（即本地开发）
-    if (process.env.NEXT_PUBLIC_API_URL) return [];
+    if (process.env.NEXT_PUBLIC_API_URL) return rules;
     const backendUrl = process.env.BACKEND_URL || 'http://localhost:5000';
     return [
+      ...rules,
       {
         source: '/api/:path*',
         destination: `${backendUrl}/api/:path*`,

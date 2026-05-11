@@ -106,7 +106,7 @@ export default function RegisterPage() {
     } catch (error: any) {
       toast({
         title: "获取绑定码失败",
-        description: error.message || "请检查 Telegram Bot 配置",
+        description: error.message || "请检查 API 服务可达性（如 522 源站超时）与 Telegram Bot 配置",
         variant: "destructive",
       });
     } finally {
