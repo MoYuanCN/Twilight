@@ -68,7 +68,7 @@ NEXT_PUBLIC_SITE_ICON=/favicon.ico
 | 变量名 | 必填 | 默认值 | 说明 |
 | --- | --- | --- | --- |
 | NEXT_PUBLIC_API_URL | 是 | [http://localhost:5000](http://localhost:5000) | 前端请求后端 API 的基地址 |
-| NEXT_PUBLIC_SITE_NAME | 否 | Twilight | 站点名称，用于登录/注册/首页等品牌文案 fallback |
+| NEXT_PUBLIC_SITE_NAME | 否 | Twilight | 站点名称，用于登录/注册/首页等页面信息 fallback |
 | NEXT_PUBLIC_SITE_TITLE | 否 | ${NEXT_PUBLIC_SITE_NAME} - Emby 管理系统 | 浏览器标签标题（title） |
 | NEXT_PUBLIC_SITE_DESCRIPTION | 否 | ${NEXT_PUBLIC_SITE_NAME} 的 Emby/Jellyfin 管理系统 | 页面描述（meta description） |
 | NEXT_PUBLIC_SITE_ICON | 否 | 空 | 浏览器图标 URL，会写入 metadata icons |
