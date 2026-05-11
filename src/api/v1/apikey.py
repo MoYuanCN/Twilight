@@ -7,8 +7,6 @@ API Key 专用接口
 权限范围 (permissions):
   account:read  - 读取账号信息、状态
   account:write - 启用/禁用/续期账号
-  score:read    - 读取积分信息
-  score:write   - 签到等积分操作
   emby:read     - 读取 Emby 状态
   emby:write    - 控制 Emby 账户（NSFW 等）
 """
@@ -26,7 +24,6 @@ apikey_bp = Blueprint('apikey', __name__, url_prefix='/apikey')
 # 所有可用的权限范围
 ALL_PERMISSIONS = [
     'account:read', 'account:write',
-    'score:read', 'score:write',
     'emby:read', 'emby:write',
 ]
 
@@ -142,9 +139,7 @@ async def get_account_info():
                 "expired_at": 1735689600,
                 "is_expired": false,
                 "is_permanent": false,
-                "days_left": 30,
-                "score": 1000,
-                "auto_renew": false
+                "days_left": 30
             }
         }
     """
@@ -166,10 +161,6 @@ async def get_account_info():
             if not is_expired:
                 days_left = max(0, (expired_at - current_time) // 86400)
     
-    # 获取积分
-    from src.db.score import ScoreOperate
-    score_record = await ScoreOperate.get_score_by_uid(user.UID)
-    
     return api_response(True, "获取成功", {
         'uid': user.UID,
         'username': user.USERNAME,
@@ -182,8 +173,6 @@ async def get_account_info():
         'is_expired': is_expired,
         'is_permanent': is_permanent,
         'days_left': days_left,
-        'score': score_record.SCORE if score_record else 0,
-        'auto_renew': user.AUTO_RENEW,
     })
 
 
@@ -414,7 +403,7 @@ async def get_permissions():
             "success": true,
             "data": {
                 "permissions": ["account:read", "account:write", ...],
-                "all_permissions": ["account:read", "account:write", "score:read", ...]
+                "all_permissions": ["account:read", "account:write", "media:read", ...]
             }
         }
     """
@@ -432,7 +421,7 @@ async def update_permissions():
     
     Request:
         {
-            "permissions": ["account:read", "score:read"]
+            "permissions": ["account:read", "media:read"]
         }
     """
     data = request.get_json() or {}
@@ -590,179 +579,6 @@ async def kick_emby_sessions():
             'kicked_count': kicked,
         })
     return api_response(False, "操作失败", code=500)
-
-
-# ==================== 积分相关 ====================
-
-@apikey_bp.route('/score', methods=['GET'])
-@require_apikey
-@require_permission('score:read')
-async def get_score():
-    """
-    获取积分信息
-    
-    Headers:
-        X-API-Key: <your_api_key>
-    
-    Response:
-        {
-            "success": true,
-            "message": "获取成功",
-            "data": {
-                "balance": 1000,
-                "score_name": "暮光币",
-                "today_checkin": false,
-                "checkin_streak": 7,
-                "total_earned": 1000,
-                "total_spent": 500
-            }
-        }
-    """
-    user = g.current_user
-    
-    from src.db.score import ScoreOperate
-    from src.config import ScoreAndRegisterConfig
-    from src.services.score_service import ScoreService
-    
-    score_record = await ScoreOperate.get_score_by_uid(user.UID)
-    
-    # 检查今日是否已签到
-    today_checkin = False
-    if score_record and score_record.CHECKIN_TIME:
-        today_start = ScoreService._get_today_start()
-        today_checkin = score_record.CHECKIN_TIME >= today_start
-    
-    return api_response(True, "获取成功", {
-        'balance': score_record.SCORE if score_record else 0,
-        'score_name': ScoreAndRegisterConfig.SCORE_NAME,
-        'today_checkin': today_checkin,
-        'checkin_streak': score_record.CHECKIN_COUNT if score_record else 0,
-        'total_earned': score_record.TOTAL_EARNED if score_record and hasattr(score_record, 'TOTAL_EARNED') else 0,
-        'total_spent': score_record.TOTAL_SPENT if score_record and hasattr(score_record, 'TOTAL_SPENT') else 0,
-    })
-
-
-@apikey_bp.route('/score/checkin', methods=['POST'])
-@require_apikey
-@require_permission('score:write')
-async def checkin():
-    """
-    签到
-    
-    Headers:
-        X-API-Key: <your_api_key>
-    
-    Response:
-        {
-            "success": true,
-            "message": "签到成功！获得 15 暮光币",
-            "data": {
-                "score": 15,
-                "balance": 1015,
-                "streak": 8,
-                "score_name": "暮光币"
-            }
-        }
-    """
-    user = g.current_user
-    
-    from src.services import ScoreService
-    from src.config import ScoreAndRegisterConfig
-    
-    result_type, response = await ScoreService.checkin(user.UID)
-    
-    return api_response(
-        result_type.value == 'success',
-        response.message,
-        {
-            'score': response.score,
-            'balance': response.balance,
-            'streak': response.streak,
-            'score_name': ScoreAndRegisterConfig.SCORE_NAME,
-        } if result_type.value == 'success' else None
-    )
-
-
-@apikey_bp.route('/score/history', methods=['GET'])
-@require_apikey
-@require_permission('score:read')
-async def get_score_history():
-    """
-    获取积分历史记录
-    
-    Headers:
-        X-API-Key: <your_api_key>
-    
-    Query Parameters:
-        page: int - 页码（默认 1）
-        per_page: int - 每页数量（默认 20，最大 100）
-        type: str - 类型筛选（可选，如 checkin, transfer, renew 等）
-    
-    Response:
-        {
-            "success": true,
-            "message": "获取成功",
-            "data": {
-                "records": [
-                    {
-                        "id": 1,
-                        "type": "checkin",
-                        "amount": 15,
-                        "balance_after": 1015,
-                        "note": "连续签到 8 天",
-                        "related_uid": null,
-                        "created_at": 1234567890
-                    }
-                ],
-                "total": 100,
-                "page": 1,
-                "per_page": 20
-            }
-        }
-    """
-    user = g.current_user
-    
-    page = request.args.get('page', 1, type=int)
-    per_page = min(request.args.get('per_page', 20, type=int), 100)
-    type_filter = request.args.get('type', '').strip()
-    
-    from src.db.score import ScoreHistoryOperate, ScoreHistoryModel, ScoreSessionFactory
-    from sqlalchemy import select, func, desc
-    
-    # 获取历史记录
-    offset = (page - 1) * per_page
-    
-    async with ScoreSessionFactory() as session:
-        # 构建查询
-        query = select(ScoreHistoryModel).filter_by(UID=user.UID)
-        if type_filter:
-            query = query.filter_by(TYPE=type_filter)
-        query = query.order_by(desc(ScoreHistoryModel.CREATED_AT)).limit(per_page).offset(offset)
-        result = await session.execute(query)
-        records = list(result.scalars().all())
-        
-        # 获取总数
-        count_query = select(func.count()).select_from(ScoreHistoryModel).filter_by(UID=user.UID)
-        if type_filter:
-            count_query = count_query.filter_by(TYPE=type_filter)
-        count_result = await session.execute(count_query)
-        total = count_result.scalar_one() or 0
-    
-    return api_response(True, "获取成功", {
-        'records': [{
-            'id': r.ID,
-            'type': r.TYPE,
-            'amount': r.AMOUNT,
-            'balance_after': r.BALANCE_AFTER,
-            'note': r.NOTE,
-            'related_uid': r.RELATED_UID,
-            'created_at': r.CREATED_AT,
-        } for r in records],
-        'total': total,
-        'page': page,
-        'per_page': per_page,
-    })
-
 
 # ==================== NSFW 库管理 ====================
 

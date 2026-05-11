@@ -10,9 +10,8 @@ from typing import List, Optional, Tuple
 from dataclasses import dataclass
 from enum import Enum
 
-from src.config import Config, ScoreAndRegisterConfig
+from src.config import Config, RegisterConfig
 from src.db.user import UserModel, UserOperate, Role, TelegramRebindRequestOperate
-from src.db.score import ScoreModel, ScoreOperate
 from src.services.emby import get_emby_client, EmbyError
 from src.core.utils import generate_password, hash_password, timestamp, days_to_seconds
 from src.core.registration_lock import (
@@ -37,7 +36,6 @@ class RegisterResult(Enum):
     INVALID_CODE = "invalid_code"
     CODE_EXPIRED = "code_expired"
     CODE_USED = "code_used"
-    INSUFFICIENT_SCORE = "insufficient_score"
     TELEGRAM_NOT_BOUND = "telegram_not_bound"
     ERROR = "error"
 
@@ -72,12 +70,12 @@ class UserService:
     @staticmethod
     async def check_registration_available(use_cache: bool = True) -> Tuple[bool, str]:
         """检查是否可以注册"""
-        if not ScoreAndRegisterConfig.REGISTER_MODE:
+        if not RegisterConfig.REGISTER_MODE:
             return False, "注册功能已关闭"
         
         current_count = await UserService.get_registered_user_count(use_cache=use_cache)
-        if current_count >= ScoreAndRegisterConfig.USER_LIMIT:
-            return False, f"已达到用户数量上限 ({ScoreAndRegisterConfig.USER_LIMIT})"
+        if current_count >= RegisterConfig.USER_LIMIT:
+            return False, f"已达到用户数量上限 ({RegisterConfig.USER_LIMIT})"
         
         return True, "可以注册"
 
@@ -220,68 +218,6 @@ class UserService:
             await release_registration_lock(locks)
 
     @staticmethod
-    async def register_by_score(
-        telegram_id: Optional[int],
-        username: str,
-        email: Optional[str] = None,
-        password: Optional[str] = None
-    ) -> RegisterResponse:
-        """通过积分注册"""
-        if not ScoreAndRegisterConfig.SCORE_REGISTER_MODE:
-            return RegisterResponse(RegisterResult.ERROR, "积分注册未开启")
-        
-        # 积分注册需要 telegram_id
-        if not telegram_id:
-            return RegisterResponse(RegisterResult.ERROR, "积分注册需要绑定 Telegram")
-
-        locks = await acquire_registration_lock(username, telegram_id)
-        if locks is None:
-            return RegisterResponse(RegisterResult.ERROR, "当前注册请求较多，请稍后重试")
-
-        global_lock = await acquire_global_registration_lock()
-        if global_lock is None:
-            await release_registration_lock(locks)
-            return RegisterResponse(RegisterResult.ERROR, "当前注册请求较多，请稍后重试")
-
-        try:
-            # 检查注册是否开放
-            available, msg = await UserService.check_registration_available(use_cache=False)
-            if not available:
-                return RegisterResponse(RegisterResult.USER_LIMIT_REACHED, msg)
-            
-            # 检查用户是否已存在
-            existing_user = await UserOperate.get_user_by_telegram_id(telegram_id)
-            if existing_user and existing_user.EMBYID:
-                return RegisterResponse(RegisterResult.USER_EXISTS, "您已经注册过了")
-
-            # 检查积分
-            score_record = await ScoreOperate.get_score_by_telegram_id(telegram_id)
-            needed = ScoreAndRegisterConfig.SCORE_REGISTER_NEED
-            
-            if not score_record or score_record.SCORE < needed:
-                current = score_record.SCORE if score_record else 0
-                return RegisterResponse(
-                    RegisterResult.INSUFFICIENT_SCORE,
-                    f"积分不足，需要 {needed} {ScoreAndRegisterConfig.SCORE_NAME}，当前 {current}"
-                )
-            
-            # 扣除积分
-            score_record.SCORE -= needed
-            await ScoreOperate.update_score(score_record)
-            
-            # 创建 Emby 账户
-            return await UserService._create_emby_user(
-                telegram_id=telegram_id,
-                username=username,
-                email=email,
-                days=30,
-                password=password
-            )
-        finally:
-            await release_global_registration_lock(global_lock)
-            await release_registration_lock(locks)
-
-    @staticmethod
     async def register_direct_emby(
         telegram_id: Optional[int],
         username: str,
@@ -289,7 +225,7 @@ class UserService:
         password: Optional[str] = None,
     ) -> RegisterResponse:
         """直接创建 Emby 账号（用于 Emby 自由注册队列）。"""
-        if not ScoreAndRegisterConfig.EMBY_DIRECT_REGISTER_ENABLED:
+        if not RegisterConfig.EMBY_DIRECT_REGISTER_ENABLED:
             return RegisterResponse(RegisterResult.ERROR, "Emby 自由注册未开启")
 
         if not telegram_id:
@@ -318,7 +254,7 @@ class UserService:
                 telegram_id=telegram_id,
                 username=username,
                 email=email,
-                days=max(int(ScoreAndRegisterConfig.EMBY_DIRECT_REGISTER_DAYS or 30), 1),
+                days=max(int(RegisterConfig.EMBY_DIRECT_REGISTER_DAYS or 30), 1),
                 password=password,
             )
         finally:
@@ -333,14 +269,11 @@ class UserService:
     ) -> RegisterResponse:
         """
         无码注册（待激活状态）
-        
-        用户注册后不创建 Emby 账户，只能签到赚积分。
-        积分够了可以使用积分激活账户。
         """
-        from src.config import ScoreAndRegisterConfig
+        from src.config import RegisterConfig
         
         # 检查是否允许无码注册
-        if not ScoreAndRegisterConfig.ALLOW_PENDING_REGISTER:
+        if not RegisterConfig.ALLOW_PENDING_REGISTER:
             return RegisterResponse(RegisterResult.ERROR, "暂不开放注册，请使用注册码")
         
         locks = await acquire_registration_lock(username, telegram_id)
@@ -354,7 +287,7 @@ class UserService:
 
         try:
             # 检查是否允许无码注册
-            if not ScoreAndRegisterConfig.ALLOW_PENDING_REGISTER:
+            if not RegisterConfig.ALLOW_PENDING_REGISTER:
                 return RegisterResponse(RegisterResult.ERROR, "暂不开放注册，请使用注册码")
 
             # 检查注册是否开放
@@ -382,28 +315,28 @@ class UserService:
             is_whitelist = False
             
             # 先检查管理员 UID 列表
-            admin_uids = ScoreAndRegisterConfig.ADMIN_UIDS
+            admin_uids = RegisterConfig.ADMIN_UIDS
             if admin_uids:
                 uid_list = [int(u.strip()) for u in admin_uids.split(',') if u.strip().isdigit()]
                 is_admin = new_uid in uid_list
             
             # 如果 UID 未匹配，再检查管理员用户名列表
             if not is_admin:
-                admin_usernames = ScoreAndRegisterConfig.ADMIN_USERNAMES
+                admin_usernames = RegisterConfig.ADMIN_USERNAMES
                 if admin_usernames:
                     name_list = [n.strip().lower() for n in admin_usernames.split(',') if n.strip()]
                     is_admin = username.lower() in name_list
             
             # 检查白名单 UID 列表
             if not is_admin:
-                whitelist_uids = ScoreAndRegisterConfig.WHITE_LIST_UIDS
+                whitelist_uids = RegisterConfig.WHITE_LIST_UIDS
                 if whitelist_uids:
                     uid_list = [int(u.strip()) for u in whitelist_uids.split(',') if u.strip().isdigit()]
                     is_whitelist = new_uid in uid_list
             
             # 如果 UID 未匹配，再检查白名单用户名列表
             if not is_admin and not is_whitelist:
-                whitelist_usernames = ScoreAndRegisterConfig.WHITE_LIST_USERNAMES
+                whitelist_usernames = RegisterConfig.WHITE_LIST_USERNAMES
                 if whitelist_usernames:
                     name_list = [n.strip().lower() for n in whitelist_usernames.split(',') if n.strip()]
                     is_whitelist = username.lower() in name_list
@@ -440,7 +373,7 @@ class UserService:
                     REGISTER_TIME=timestamp(),
                 )
             else:
-                # 普通用户：已激活但无 Emby 账户（需要积分激活 Emby 功能）
+                # 普通用户：已激活但无 Emby 账户
                 user = UserModel(
                     UID=new_uid,
                     TELEGRAM_ID=telegram_id,
@@ -449,91 +382,23 @@ class UserService:
                     EMBYID=None,  # 无 Emby 账户
                     PASSWORD=hash_password(user_password),
                     ROLE=Role.NORMAL.value,
-                    ACTIVE_STATUS=True,  # 账户激活，可以登录、签到
+                    ACTIVE_STATUS=True,  # 账户激活，可以登录
                     EXPIRED_AT=-1,
                     REGISTER_TIME=timestamp(),
                 )
             await UserOperate.add_user(user)
             
-            # 初始化积分记录（获取或创建）
-            from src.db.score import ScoreOperate
-            score_record = await ScoreOperate.get_score_by_uid(new_uid)
-            if not score_record:
-                from src.db.score import ScoreModel
-                score_record = ScoreModel(
-                    UID=new_uid,
-                    TELEGRAM_ID=telegram_id,
-                    SCORE=ScoreAndRegisterConfig.PENDING_REGISTER_BONUS,  # 赠送初始积分
-                )
-                await ScoreOperate.add_score(score_record)
-            else:
-                # 已有记录，增加积分
-                score_record.SCORE += ScoreAndRegisterConfig.PENDING_REGISTER_BONUS
-                await ScoreOperate.update_score(score_record)
-            
             logger.info(f"待激活用户注册: {username} (UID: {new_uid})")
-            
-            activate_cost = ScoreAndRegisterConfig.SCORE_REGISTER_NEED
+
             return RegisterResponse(
                 result=RegisterResult.SUCCESS,
-                message=f"注册成功！您可以登录使用基础功能，积攒 {activate_cost} 积分后可激活 Emby 账户",
+                message="注册成功！您可以登录并使用基础功能。",
                 user=user,
                 emby_password=user_password if not password else None
             )
         finally:
             await release_global_registration_lock(global_lock)
             await release_registration_lock(locks)
-
-    @staticmethod
-    async def activate_pending_user(user: UserModel) -> Tuple[bool, str]:
-        """
-        激活待激活用户（使用积分创建 Emby 账户）
-        """
-        from src.config import ScoreAndRegisterConfig
-        
-        if user.EMBYID:
-            return False, "账户已激活"
-        
-        # 检查积分
-        from src.db.score import ScoreOperate
-        score_record = await ScoreOperate.get_score_by_uid(user.UID)
-        needed = ScoreAndRegisterConfig.SCORE_REGISTER_NEED
-        
-        if not score_record or score_record.SCORE < needed:
-            current = score_record.SCORE if score_record else 0
-            return False, f"积分不足，需要 {needed}，当前 {current}"
-        
-        # 扣除积分
-        score_record.SCORE -= needed
-        await ScoreOperate.update_score(score_record)
-        
-        # 创建 Emby 账户
-        emby = get_emby_client()
-        password = generate_password(12)
-        
-        try:
-            emby_user = await emby.create_user(user.USERNAME, password)
-            if not emby_user:
-                # 退还积分
-                score_record.SCORE += needed
-                await ScoreOperate.update_score(score_record)
-                return False, "创建 Emby 账户失败"
-            
-            # 更新用户
-            user.EMBYID = emby_user.id
-            user.ACTIVE_STATUS = True
-            user.EXPIRED_AT = timestamp() + days_to_seconds(30)  # 30天有效期
-            await UserOperate.update_user(user)
-            
-            logger.info(f"用户激活成功: {user.USERNAME}")
-            return True, f"账户激活成功！Emby 密码: {password}，有效期 30 天"
-            
-        except Exception as e:
-            # 退还积分
-            score_record.SCORE += needed
-            await ScoreOperate.update_score(score_record)
-            logger.error(f"激活失败: {e}")
-            return False, f"激活失败: {e}"
 
     @staticmethod
     async def _create_emby_user(
@@ -600,24 +465,24 @@ class UserService:
                 is_whitelist = False
                 
                 # 检查管理员
-                admin_uids = ScoreAndRegisterConfig.ADMIN_UIDS
+                admin_uids = RegisterConfig.ADMIN_UIDS
                 if admin_uids:
                     uid_list = [int(u.strip()) for u in admin_uids.split(',') if u.strip().isdigit()]
                     is_admin = new_uid in uid_list
                 if not is_admin:
-                    admin_usernames = ScoreAndRegisterConfig.ADMIN_USERNAMES
+                    admin_usernames = RegisterConfig.ADMIN_USERNAMES
                     if admin_usernames:
                         name_list = [n.strip().lower() for n in admin_usernames.split(',') if n.strip()]
                         is_admin = username.lower() in name_list
                 
                 # 检查白名单
                 if not is_admin:
-                    whitelist_uids = ScoreAndRegisterConfig.WHITE_LIST_UIDS
+                    whitelist_uids = RegisterConfig.WHITE_LIST_UIDS
                     if whitelist_uids:
                         uid_list = [int(u.strip()) for u in whitelist_uids.split(',') if u.strip().isdigit()]
                         is_whitelist = new_uid in uid_list
                 if not is_admin and not is_whitelist:
-                    whitelist_usernames = ScoreAndRegisterConfig.WHITE_LIST_USERNAMES
+                    whitelist_usernames = RegisterConfig.WHITE_LIST_USERNAMES
                     if whitelist_usernames:
                         name_list = [n.strip().lower() for n in whitelist_usernames.split(',') if n.strip()]
                         is_whitelist = username.lower() in name_list
@@ -716,63 +581,6 @@ class UserService:
         return True, f"续期成功！增加 {days} 天"
 
     @staticmethod
-    async def renew_by_score(user: UserModel) -> Tuple[bool, str]:
-        """使用积分续期"""
-        if not ScoreAndRegisterConfig.AUTO_RENEW_ENABLED:
-            return False, "积分续期功能未开启"
-        
-        renew_days = ScoreAndRegisterConfig.AUTO_RENEW_DAYS
-        renew_cost = ScoreAndRegisterConfig.AUTO_RENEW_COST
-        
-        # 检查积分
-        score = await ScoreOperate.get_score_by_uid(user.UID)
-        if not score or score.SCORE < renew_cost:
-            current = score.SCORE if score else 0
-            return False, f"积分不足，需要 {renew_cost} {ScoreAndRegisterConfig.SCORE_NAME}，当前 {current}"
-        
-        # 扣除积分
-        score.SCORE -= renew_cost
-        if hasattr(score, 'TOTAL_SPENT'):
-            score.TOTAL_SPENT = (score.TOTAL_SPENT or 0) + renew_cost
-        await ScoreOperate.update_score(score)
-        
-        # 执行续期
-        success, msg = await UserService.renew_user(user, renew_days)
-        
-        if success:
-            # 记录历史
-            from src.db.score import ScoreHistoryOperate
-            await ScoreHistoryOperate.add_history(
-                uid=user.UID,
-                type_='renew',
-                amount=-renew_cost,
-                balance_after=score.SCORE,
-                note=f"使用积分续期 {renew_days} 天"
-            )
-            
-            # 通知（可选）
-            if user.TELEGRAM_ID and ScoreAndRegisterConfig.AUTO_RENEW_NOTIFY:
-                from src.services.notification import NotificationService, Notification, NotificationType
-                try:
-                    await NotificationService.send(Notification(
-                        type=NotificationType.USER_RENEWED,
-                        title="✅ 积分续期成功",
-                        content=f"使用 {renew_cost} {ScoreAndRegisterConfig.SCORE_NAME} 续期 {renew_days} 天成功！",
-                        target_users=[user.TELEGRAM_ID]
-                    ))
-                except:
-                    pass
-            
-            return True, f"续期成功！增加 {renew_days} 天，花费 {renew_cost} 积分"
-        else:
-            # 退还积分
-            score.SCORE += renew_cost
-            if hasattr(score, 'TOTAL_SPENT'):
-                score.TOTAL_SPENT = (score.TOTAL_SPENT or 0) - renew_cost
-            await ScoreOperate.update_score(score)
-            return False, f"续期失败: {msg}"
-
-    @staticmethod
     async def disable_user(user: UserModel, reason: str = "") -> Tuple[bool, str]:
         """禁用用户"""
         try:
@@ -820,11 +628,6 @@ class UserService:
             if delete_emby and user.EMBYID:
                 emby = get_emby_client()
                 await emby.delete_user(user.EMBYID)
-            
-            # 删除积分记录
-            score = await ScoreOperate.get_score_by_uid(user.UID)
-            if score:
-                await ScoreOperate.delete_score(score)
             
             # 删除用户记录
             await UserOperate.delete_user(user)
@@ -1222,20 +1025,13 @@ class UserService:
             "nsfw_enabled": user.NSFW,
             "nsfw_allowed": user.NSFW_ALLOWED,
             "bgm_mode": user.BGM_MODE,
-            "auto_renew": user.AUTO_RENEW or False,
             "avatar": user.AVATAR or None,
             "register_time": user.REGISTER_TIME,
             "created_at": user.REGISTER_TIME,  # 前端兼容字段
             "emby_id": user.EMBYID,  # 添加 Emby ID
             "emby_username": embay_username,
         }
-        
-        # 获取积分
-        score = await ScoreOperate.get_score_by_uid(user.UID)
-        if score:
-            info["score"] = score.SCORE
-            info["checkin_count"] = score.CHECKIN_COUNT
-        
+
         return info
 
     @staticmethod

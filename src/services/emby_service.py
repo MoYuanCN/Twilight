@@ -8,7 +8,7 @@ import logging
 from typing import Optional, List, Tuple, Dict, Any
 from dataclasses import dataclass
 
-from src.config import EmbyConfig, ScoreAndRegisterConfig
+from src.config import EmbyConfig, RegisterConfig
 from src.db.user import UserModel, UserOperate, Role
 from src.services.emby import (
     get_emby_client,

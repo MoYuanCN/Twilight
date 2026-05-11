@@ -1,6 +1,6 @@
 import logging
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from src.config import ScoreAndRegisterConfig, SchedulerConfig
+from src.config import RegisterConfig, SchedulerConfig
 from src.db.user import UserOperate
 from src.services import get_emby_client, EmbyService
 from src.core.utils import timestamp, format_duration
@@ -95,7 +95,7 @@ class SchedulerService:
             logger.info("=" * 50)
             logger.info("📈 Twilight 每日统计")
             logger.info("=" * 50)
-            logger.info(f"👥 注册用户: {registered} / {ScoreAndRegisterConfig.USER_LIMIT}")
+            logger.info(f"👥 注册用户: {registered} / {RegisterConfig.USER_LIMIT}")
             logger.info(f"✅ 活跃用户: {active}")
             logger.info(f"🎫 可用注册码: {regcodes}")
             logger.info(f"📺 Emby 状态: {'在线' if server_status.get('online') else '离线'}")
@@ -104,20 +104,6 @@ class SchedulerService:
             logger.info("=" * 50)
         except Exception as e:
             logger.error(f"❌ 生成统计时发生错误: {e}")
-
-    @staticmethod
-    async def auto_renew_check():
-        """积分自动续期检查"""
-        from src.services.auto_renew_service import AutoRenewService
-        logger.info("🔄 开始积分自动续期检查...")
-        try:
-            result = await AutoRenewService.check_and_renew()
-            if result.get('enabled'):
-                logger.info(f"✅ 自动续期完成: 成功 {result['renewed']}, 失败 {result['failed']}, 积分不足 {result['insufficient']}")
-            else:
-                logger.info("ℹ️ 自动续期功能未启用")
-        except Exception as e:
-            logger.error(f"❌ 自动续期检查出错: {e}")
 
     @staticmethod
     async def send_expiry_reminders():
@@ -146,9 +132,9 @@ class SchedulerService:
     @staticmethod
     async def cleanup_no_emby_users():
         """清理注册后长期未创建 Emby 账户的用户"""
-        if not ScoreAndRegisterConfig.AUTO_CLEANUP_NO_EMBY:
+        if not RegisterConfig.AUTO_CLEANUP_NO_EMBY:
             return
-        days = ScoreAndRegisterConfig.AUTO_CLEANUP_NO_EMBY_DAYS
+        days = RegisterConfig.AUTO_CLEANUP_NO_EMBY_DAYS
         logger.info(f"🧹 开始清理注册超过 {days} 天无 Emby 账户的用户...")
         try:
             users = await UserOperate.get_no_emby_users(days)
@@ -192,9 +178,6 @@ class SchedulerService:
                 return 0, 0
 
         # 注册定时任务
-        h, m = parse_time(SchedulerConfig.AUTO_RENEW_TIME)
-        scheduler.add_job(cls.auto_renew_check, 'cron', hour=h, minute=m, id='auto_renew')
-        
         h, m = parse_time(SchedulerConfig.EXPIRED_CHECK_TIME)
         scheduler.add_job(cls.check_expired_users, 'cron', hour=h, minute=m, id='check_expired')
         
@@ -217,14 +200,13 @@ class SchedulerService:
         scheduler.start()
         logger.info("=" * 50)
         logger.info(f"🌙 Twilight Scheduler 已启动 ({SchedulerConfig.TIMEZONE})")
-        logger.info(f"  - 自动续期: {SchedulerConfig.AUTO_RENEW_TIME}")
         logger.info(f"  - 过期检查: {SchedulerConfig.EXPIRED_CHECK_TIME}")
         logger.info(f"  - 到期提醒: {SchedulerConfig.EXPIRING_CHECK_TIME}")
         logger.info(f"  - 每日统计: {SchedulerConfig.DAILY_STATS_TIME}")
         logger.info(f"  - 会话清理: 每 {SchedulerConfig.SESSION_CLEANUP_INTERVAL} 小时")
         logger.info(f"  - Emby 同步: 每 {SchedulerConfig.EMBY_SYNC_INTERVAL} 小时")
-        if ScoreAndRegisterConfig.AUTO_CLEANUP_NO_EMBY:
-            logger.info(f"  - 无 Emby 清理: {SchedulerConfig.EXPIRED_CHECK_TIME} (注册超 {ScoreAndRegisterConfig.AUTO_CLEANUP_NO_EMBY_DAYS} 天)")
+        if RegisterConfig.AUTO_CLEANUP_NO_EMBY:
+            logger.info(f"  - 无 Emby 清理: {SchedulerConfig.EXPIRED_CHECK_TIME} (注册超 {RegisterConfig.AUTO_CLEANUP_NO_EMBY_DAYS} 天)")
         logger.info("=" * 50)
         
         # 立即运行一次统计

@@ -63,8 +63,19 @@ async def safe_edit_message(message, text: str, reply_markup=None, parse_mode="M
     try:
         return await message.edit_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
     except BadRequest as e:
-        if "Message is not modified" not in str(e):
-            logger.warning(f"编辑消息失败: {e}")
+        err = str(e)
+        if "Message is not modified" in err:
+            return None
+
+        # 某些场景下消息不可编辑（过久、已删除、来源受限），退化为回复新消息
+        if "Message can't be edited" in err or "message to edit not found" in err.lower():
+            try:
+                return await message.reply_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
+            except Exception as send_err:
+                logger.warning(f"编辑失败且回退发送失败: {send_err}")
+                return None
+
+        logger.warning(f"编辑消息失败: {e}")
         return None
     except Exception as e:
         logger.warning(f"编辑消息失败: {e}")
@@ -146,7 +157,7 @@ def require_registered(func: Callable) -> Callable:
             msg = (
                 "⚠️ 您尚未绑定账号\n\n"
                 "请使用 /bind <绑定码> 绑定您的账号\n"
-                "或使用 /reg <注册码> 注册新账号"
+                "请先在网页端完成注册后再绑定"
             )
             if update.callback_query:
                 await answer_callback_safe(update.callback_query, "请先绑定或注册账号", show_alert=True)
@@ -281,13 +292,8 @@ def close_button() -> InlineKeyboardButton:
 
 def main_menu_keyboard(user_id: int) -> InlineKeyboardMarkup:
     panel_on = is_panel_enabled()
-    buttons = [
-        [
-            InlineKeyboardButton("👤 个人中心", callback_data="panel_user"),
-        ],
-    ]
+    buttons = [[InlineKeyboardButton("👤 个人中心", callback_data="panel_user")]]
     if panel_on:
-        buttons[0].append(InlineKeyboardButton("💰 积分中心", callback_data="panel_score"))
         buttons.append([
             InlineKeyboardButton("🎬 Emby", callback_data="panel_emby"),
             InlineKeyboardButton("📋 帮助", callback_data="panel_help"),

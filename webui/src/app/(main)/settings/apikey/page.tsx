@@ -13,7 +13,6 @@ import {
   CheckCircle2,
   XCircle,
   Shield,
-  ShieldAlert,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -45,8 +44,6 @@ interface ApiKey {
   key: string;
   key_full: string;
   enabled: boolean;
-  allow_checkin: boolean;
-  allow_transfer: boolean;
   allow_query: boolean;
   rate_limit: number;
   request_count: number;
@@ -55,12 +52,8 @@ interface ApiKey {
   expired_at: number | null;
 }
 
-function isNormalOps(k: { allow_checkin: boolean; allow_query: boolean }) {
-  return k.allow_checkin && k.allow_query;
-}
-
-function isSensitiveOps(k: { allow_transfer: boolean }) {
-  return k.allow_transfer;
+function isNormalOps(k: { allow_query: boolean }) {
+  return k.allow_query;
 }
 
 export default function ApiKeyPage() {
@@ -72,7 +65,6 @@ export default function ApiKeyPage() {
   const [newKeyForm, setNewKeyForm] = useState({
     name: "",
     normalOps: true,
-    sensitiveOps: false,
     rate_limit: 100,
   });
   const [generatedKey, setGeneratedKey] = useState<string | null>(null);
@@ -83,7 +75,6 @@ export default function ApiKeyPage() {
     name: "",
     enabled: false,
     normalOps: true,
-    sensitiveOps: false,
     rate_limit: 100,
   });
 
@@ -114,14 +105,12 @@ export default function ApiKeyPage() {
     try {
       const res = await api.createMyApiKey({
         name: newKeyForm.name.trim(),
-        allow_checkin: newKeyForm.normalOps,
-        allow_transfer: newKeyForm.sensitiveOps,
         allow_query: newKeyForm.normalOps,
         rate_limit: newKeyForm.rate_limit,
       });
       if (res.success && res.data?.key) {
         setGeneratedKey(res.data.key);
-        setNewKeyForm({ name: "", normalOps: true, sensitiveOps: false, rate_limit: 100 });
+        setNewKeyForm({ name: "", normalOps: true, rate_limit: 100 });
         await loadApiKeys();
       } else {
         toast({ title: "创建失败", description: res.message || "无法创建 API Key", variant: "destructive" });
@@ -140,8 +129,6 @@ export default function ApiKeyPage() {
       const res = await api.updateMyApiKey(editingKey.id, {
         name: editForm.name,
         enabled: editForm.enabled,
-        allow_checkin: editForm.normalOps,
-        allow_transfer: editForm.sensitiveOps,
         allow_query: editForm.normalOps,
         rate_limit: editForm.rate_limit,
       });
@@ -243,7 +230,6 @@ export default function ApiKeyPage() {
                             name: apiKey.name,
                             enabled: apiKey.enabled,
                             normalOps: isNormalOps(apiKey),
-                            sensitiveOps: isSensitiveOps(apiKey),
                             rate_limit: apiKey.rate_limit,
                           });
                           setOpenEdit(true);
@@ -280,10 +266,6 @@ export default function ApiKeyPage() {
                     <span className="flex items-center gap-1">
                       <Shield className="h-3 w-3" />
                       普通操作: {isNormalOps(apiKey) ? <CheckCircle2 className="h-3 w-3 text-green-500" /> : <XCircle className="h-3 w-3 text-red-500" />}
-                    </span>
-                    <span className="flex items-center gap-1">
-                      <ShieldAlert className="h-3 w-3" />
-                      敏感操作: {isSensitiveOps(apiKey) ? <CheckCircle2 className="h-3 w-3 text-green-500" /> : <XCircle className="h-3 w-3 text-red-500" />}
                     </span>
                     <Separator orientation="vertical" className="h-3" />
                     <span>{apiKey.request_count} 次请求</span>
@@ -322,7 +304,7 @@ export default function ApiKeyPage() {
               <>
                 <div className="space-y-2">
                   <Label>名称</Label>
-                  <Input placeholder="例如: 自动签到脚本" value={newKeyForm.name}
+                  <Input placeholder="例如: 自动查询脚本" value={newKeyForm.name}
                     onChange={(e) => setNewKeyForm({ ...newKeyForm, name: e.target.value })} />
                 </div>
                 <div className="space-y-3">
@@ -333,21 +315,10 @@ export default function ApiKeyPage() {
                         <Shield className="h-4 w-4 text-blue-500" />
                         <span className="text-sm font-medium">普通操作</span>
                       </div>
-                      <p className="text-xs text-muted-foreground mt-0.5">查询信息、每日签到等</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">查询信息等只读操作</p>
                     </div>
                     <Switch checked={newKeyForm.normalOps}
                       onCheckedChange={(v) => setNewKeyForm({ ...newKeyForm, normalOps: v })} />
-                  </div>
-                  <div className="flex items-center justify-between p-3 border rounded-md">
-                    <div>
-                      <div className="flex items-center gap-1.5">
-                        <ShieldAlert className="h-4 w-4 text-orange-500" />
-                        <span className="text-sm font-medium">敏感操作</span>
-                      </div>
-                      <p className="text-xs text-muted-foreground mt-0.5">积分转让等涉及资产变动的操作</p>
-                    </div>
-                    <Switch checked={newKeyForm.sensitiveOps}
-                      onCheckedChange={(v) => setNewKeyForm({ ...newKeyForm, sensitiveOps: v })} />
                   </div>
                 </div>
                 <div className="space-y-2">
@@ -397,21 +368,10 @@ export default function ApiKeyPage() {
                       <Shield className="h-4 w-4 text-blue-500" />
                       <span className="text-sm font-medium">普通操作</span>
                     </div>
-                    <p className="text-xs text-muted-foreground mt-0.5">查询信息、每日签到等</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">查询信息等只读操作</p>
                   </div>
                   <Switch checked={editForm.normalOps}
                     onCheckedChange={(v) => setEditForm({ ...editForm, normalOps: v })} />
-                </div>
-                <div className="flex items-center justify-between p-3 border rounded-md">
-                  <div>
-                    <div className="flex items-center gap-1.5">
-                      <ShieldAlert className="h-4 w-4 text-orange-500" />
-                      <span className="text-sm font-medium">敏感操作</span>
-                    </div>
-                    <p className="text-xs text-muted-foreground mt-0.5">积分转让等涉及资产变动的操作</p>
-                  </div>
-                  <Switch checked={editForm.sensitiveOps}
-                    onCheckedChange={(v) => setEditForm({ ...editForm, sensitiveOps: v })} />
                 </div>
               </div>
               <div className="space-y-2">

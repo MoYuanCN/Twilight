@@ -359,7 +359,6 @@ bot_token = "your_bot_token"
 admin_id = [123456789]
 
 [SAR]
-score_name = "暮光币"
 register_mode = true
 user_limit = 200
 ```

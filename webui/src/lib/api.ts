@@ -248,13 +248,6 @@ class ApiClient {
     });
   }
 
-  async updateAutoRenew(enabled: boolean) {
-    return this.request("/users/me/auto-renew", {
-      method: "PUT",
-      body: JSON.stringify({ enabled }),
-    });
-  }
-
   async getTelegramStatus() {
     return this.request<TelegramStatus>("/users/me/telegram");
   }
@@ -345,66 +338,6 @@ class ApiClient {
     return this.request("/users/me/nsfw", {
       method: "PUT",
       body: JSON.stringify({ enable, library_names: libraryNames }),
-    });
-  }
-
-  // Score
-  async getScoreInfo() {
-    return this.request<ScoreInfo>("/score/info");
-  }
-
-  async checkin() {
-    return this.request<CheckinResult>("/score/checkin", {
-      method: "POST",
-    });
-  }
-
-  async getScoreHistory(page = 1, perPage = 20) {
-    return this.request<{ records: ScoreRecord[]; total: number }>(
-      `/score/history?page=${page}&per_page=${perPage}`
-    );
-  }
-
-  async transferScore(toUid: number, amount: number, note?: string) {
-    return this.request("/score/transfer", {
-      method: "POST",
-      body: JSON.stringify({ to_uid: toUid, amount, note }),
-    });
-  }
-
-  async getScoreConfig() {
-    return this.request<ScoreConfig>("/score/config");
-  }
-
-  async createRedPacket(amount: number, count: number, type: number) {
-    return this.request<{ rp_key: string; amount: number; count: number; type: string }>(
-      "/score/redpacket",
-      {
-        method: "POST",
-        body: JSON.stringify({ amount, count, type }),
-      }
-    );
-  }
-
-  async grabRedPacket(rpKey: string) {
-    return this.request<{ amount: number; total_score: number }>(
-      `/score/redpacket/${rpKey}/grab`,
-      {
-        method: "POST",
-      }
-    );
-  }
-
-  async withdrawRedPacket(rpKey: string) {
-    return this.request(`/score/redpacket/${rpKey}/withdraw`, {
-      method: "POST",
-    });
-  }
-
-  async renewWithScore(days: number) {
-    return this.request("/users/me/renew-by-score", {
-      method: "POST",
-      body: JSON.stringify({ days }),
     });
   }
 
@@ -544,13 +477,6 @@ class ApiClient {
     return this.request(`/admin/users/${uid}/nsfw`, {
       method: "PUT",
       body: JSON.stringify({ grant }),
-    });
-  }
-
-  async updateMyAdminInfo(data: { score?: number }) {
-    return this.request("/admin/me/update", {
-      method: "PUT",
-      body: JSON.stringify(data),
     });
   }
 
@@ -866,8 +792,6 @@ class ApiClient {
 
   async createMyApiKey(payload: {
     name: string;
-    allow_checkin: boolean;
-    allow_transfer: boolean;
     allow_query: boolean;
     rate_limit: number;
   }) {
@@ -882,8 +806,6 @@ class ApiClient {
     payload: {
       name: string;
       enabled: boolean;
-      allow_checkin: boolean;
-      allow_transfer: boolean;
       allow_query: boolean;
       rate_limit: number;
     }
@@ -961,7 +883,6 @@ export interface SystemInfo {
   version: string;
   features: Record<string, boolean>;
   limits: Record<string, number | null>;
-  score: Record<string, string | number>;
 }
 
 export interface SystemHealth {
@@ -990,8 +911,6 @@ export interface UserInfo {
   expired_at?: string | number;  // 可能是时间戳或字符串，-1 表示永久
   emby_id?: string;
   avatar?: string;
-  score: number;
-  auto_renew: boolean;
   bgm_mode: boolean;
   nsfw: boolean | {  // 可能是布尔值（列表）或对象（详情）
     enabled: boolean;
@@ -1011,8 +930,6 @@ export interface ApiKeyItem {
   key: string;
   key_full: string;
   enabled: boolean;
-  allow_checkin: boolean;
-  allow_transfer: boolean;
   allow_query: boolean;
   rate_limit: number;
   request_count: number;
@@ -1022,7 +939,6 @@ export interface ApiKeyItem {
 }
 
 export interface UserSettings {
-  auto_renew: boolean;
   nsfw_enabled: boolean;
   nsfw_can_toggle: boolean;
   bgm_mode: boolean;
@@ -1041,9 +957,6 @@ export interface UserSettings {
     message: string;
   };
   system_config: {
-    auto_renew_enabled: boolean;
-    auto_renew_cost: number;
-    auto_renew_days: number;
     device_limit_enabled: boolean;
     max_devices: number;
     max_streams: number;
@@ -1090,60 +1003,6 @@ export interface NsfwStatus {
   can_toggle: boolean;
   libraries: Array<{ name: string; enabled: boolean }>;
   message: string;
-}
-
-export interface ScoreInfo {
-  balance: number;
-  score_name: string;
-  today_checkin: boolean;
-  checkin_streak: number;
-  total_earned: number;
-  total_spent: number;
-}
-
-export interface ScoreConfig {
-  score_name: string;
-  checkin: {
-    base_score: number;
-    streak_bonus: number;
-    max_streak_bonus: number;
-    random_range: [number, number];
-  };
-  transfer: {
-    enabled: boolean;
-    min_amount: number;
-    max_amount: number;
-    fee_rate: number;
-  };
-  red_packet: {
-    enabled: boolean;
-    min_amount: number;
-    max_amount: number;
-    min_count: number;
-    max_count: number;
-  };
-  auto_renew: {
-    enabled: boolean;
-    days: number;
-    cost: number;
-  };
-}
-
-export interface CheckinResult {
-  score: number;
-  balance: number;
-  streak: number;
-  message: string;
-}
-
-export interface ScoreRecord {
-  id: number;
-  type: string;
-  amount: number;
-  balance_after: number;
-  note?: string;
-  related_uid?: number;
-  created_at: number;  // 时间戳
 }
 
 export interface MediaItem {
@@ -1284,8 +1143,6 @@ export interface RegisterAvailability {
   current_users: number;
   max_users: number;
   register_mode: boolean;
-  score_register_mode: boolean;
-  score_register_need: number;
   allow_pending_register: boolean;
   emby_direct_register_enabled: boolean;
   emby_direct_register_days: number;
@@ -1325,7 +1182,6 @@ export interface AdminUserListResponse {
 export interface UserUpdateData {
   role?: number;
   active?: boolean;
-  score?: number;
   expired_at?: string;
 }
 

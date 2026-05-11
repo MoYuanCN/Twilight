@@ -8,7 +8,7 @@ from sqlalchemy import text
 
 from src.api.v1.auth import require_auth, require_admin, api_response
 from src.config import (
-    Config, EmbyConfig, ScoreAndRegisterConfig,
+    Config, EmbyConfig, RegisterConfig,
     DeviceLimitConfig, APIConfig, SecurityConfig,
     SchedulerConfig, NotificationConfig, TelegramConfig,
     BangumiSyncConfig
@@ -91,24 +91,15 @@ async def get_system_info():
         'icon': Config.SERVER_ICON or '',
         'version': __version__,
         'features': {
-            'register': ScoreAndRegisterConfig.REGISTER_MODE,
-            'score_register': ScoreAndRegisterConfig.SCORE_REGISTER_MODE,
-            'emby_direct_register': ScoreAndRegisterConfig.EMBY_DIRECT_REGISTER_ENABLED,
+            'register': RegisterConfig.REGISTER_MODE,
+            'emby_direct_register': RegisterConfig.EMBY_DIRECT_REGISTER_ENABLED,
             'telegram': Config.TELEGRAM_MODE,
-            'red_packet': ScoreAndRegisterConfig.RED_PACKET_MODE,
-            'transfer': ScoreAndRegisterConfig.PRIVATE_TRANSFER_MODE,
-            'auto_renew': ScoreAndRegisterConfig.AUTO_RENEW_ENABLED,
-            'invite': ScoreAndRegisterConfig.INVITE_ENABLED,
+            'invite': RegisterConfig.INVITE_ENABLED,
             'force_bind_telegram': Config.FORCE_BIND_TELEGRAM,
         },
         'limits': {
-            'user_limit': ScoreAndRegisterConfig.USER_LIMIT,
+            'user_limit': RegisterConfig.USER_LIMIT,
             'stream_limit': DeviceLimitConfig.MAX_STREAMS if DeviceLimitConfig.DEVICE_LIMIT_ENABLED else None,
-        },
-        'score': {
-            'name': ScoreAndRegisterConfig.SCORE_NAME,
-            'register_need': ScoreAndRegisterConfig.SCORE_REGISTER_NEED,
-            'auto_renew_cost': ScoreAndRegisterConfig.AUTO_RENEW_COST,
         },
     })
 
@@ -230,34 +221,6 @@ async def get_emby_urls():
 async def get_user_config():
     """获取用户可见的配置"""
     return api_response(True, "获取成功", {
-        'score': {
-            'name': ScoreAndRegisterConfig.SCORE_NAME,
-            'checkin': {
-                'base': ScoreAndRegisterConfig.CHECKIN_BASE_SCORE,
-                'streak_bonus': ScoreAndRegisterConfig.CHECKIN_STREAK_BONUS,
-                'max_streak': ScoreAndRegisterConfig.CHECKIN_MAX_STREAK_BONUS,
-                'random_range': [ScoreAndRegisterConfig.CHECKIN_RANDOM_MIN, ScoreAndRegisterConfig.CHECKIN_RANDOM_MAX],
-            },
-            'transfer': {
-                'enabled': ScoreAndRegisterConfig.PRIVATE_TRANSFER_MODE,
-                'min': ScoreAndRegisterConfig.TRANSFER_MIN_AMOUNT,
-                'max': ScoreAndRegisterConfig.TRANSFER_MAX_AMOUNT,
-                'fee_rate': ScoreAndRegisterConfig.TRANSFER_FEE_RATE,
-            },
-            'red_packet': {
-                'enabled': ScoreAndRegisterConfig.RED_PACKET_MODE,
-                'min_amount': ScoreAndRegisterConfig.RED_PACKET_MIN_AMOUNT,
-                'max_amount': ScoreAndRegisterConfig.RED_PACKET_MAX_AMOUNT,
-                'min_count': ScoreAndRegisterConfig.RED_PACKET_MIN_COUNT,
-                'max_count': ScoreAndRegisterConfig.RED_PACKET_MAX_COUNT,
-            },
-        },
-        'auto_renew': {
-            'enabled': ScoreAndRegisterConfig.AUTO_RENEW_ENABLED,
-            'days': ScoreAndRegisterConfig.AUTO_RENEW_DAYS,
-            'cost': ScoreAndRegisterConfig.AUTO_RENEW_COST,
-            'before_days': ScoreAndRegisterConfig.AUTO_RENEW_BEFORE_DAYS,
-        },
         'device_limit': {
             'enabled': DeviceLimitConfig.DEVICE_LIMIT_ENABLED,
             'max_devices': DeviceLimitConfig.MAX_DEVICES,
@@ -295,21 +258,15 @@ async def get_admin_config():
             'force_subscribe': TelegramConfig.FORCE_SUBSCRIBE,
         },
         'sar': {
-            'score_name': ScoreAndRegisterConfig.SCORE_NAME,
-            'register_mode': ScoreAndRegisterConfig.REGISTER_MODE,
-            'register_code_limit': ScoreAndRegisterConfig.REGISTER_CODE_LIMIT,
-            'score_register_mode': ScoreAndRegisterConfig.SCORE_REGISTER_MODE,
-            'score_register_need': ScoreAndRegisterConfig.SCORE_REGISTER_NEED,
-            'emby_direct_register_enabled': ScoreAndRegisterConfig.EMBY_DIRECT_REGISTER_ENABLED,
-            'emby_direct_register_days': ScoreAndRegisterConfig.EMBY_DIRECT_REGISTER_DAYS,
-            'emby_direct_register_workers': ScoreAndRegisterConfig.EMBY_DIRECT_REGISTER_WORKERS,
-            'emby_direct_register_max_queue': ScoreAndRegisterConfig.EMBY_DIRECT_REGISTER_MAX_QUEUE,
-            'emby_direct_register_status_ttl': ScoreAndRegisterConfig.EMBY_DIRECT_REGISTER_STATUS_TTL,
-            'user_limit': ScoreAndRegisterConfig.USER_LIMIT,
-            'red_packet_mode': ScoreAndRegisterConfig.RED_PACKET_MODE,
-            'transfer_mode': ScoreAndRegisterConfig.PRIVATE_TRANSFER_MODE,
-            'auto_renew_enabled': ScoreAndRegisterConfig.AUTO_RENEW_ENABLED,
-            'invite_enabled': ScoreAndRegisterConfig.INVITE_ENABLED,
+            'register_mode': RegisterConfig.REGISTER_MODE,
+            'register_code_limit': RegisterConfig.REGISTER_CODE_LIMIT,
+            'emby_direct_register_enabled': RegisterConfig.EMBY_DIRECT_REGISTER_ENABLED,
+            'emby_direct_register_days': RegisterConfig.EMBY_DIRECT_REGISTER_DAYS,
+            'emby_direct_register_workers': RegisterConfig.EMBY_DIRECT_REGISTER_WORKERS,
+            'emby_direct_register_max_queue': RegisterConfig.EMBY_DIRECT_REGISTER_MAX_QUEUE,
+            'emby_direct_register_status_ttl': RegisterConfig.EMBY_DIRECT_REGISTER_STATUS_TTL,
+            'user_limit': RegisterConfig.USER_LIMIT,
+            'invite_enabled': RegisterConfig.INVITE_ENABLED,
         },
         'device_limit': {
             'enabled': DeviceLimitConfig.DEVICE_LIMIT_ENABLED,
@@ -367,8 +324,8 @@ async def get_system_stats():
         'users': {
             'total': total_users,
             'active': active_users,
-            'limit': ScoreAndRegisterConfig.USER_LIMIT,
-            'usage_percent': round(total_users / ScoreAndRegisterConfig.USER_LIMIT * 100, 1) if ScoreAndRegisterConfig.USER_LIMIT > 0 else 0,
+            'limit': RegisterConfig.USER_LIMIT,
+            'usage_percent': round(total_users / RegisterConfig.USER_LIMIT * 100, 1) if RegisterConfig.USER_LIMIT > 0 else 0,
         },
         'regcodes': regcode_stats,
         'emby': emby_status,
@@ -445,7 +402,7 @@ async def update_config_toml():
         
         # 重新加载配置
         from src.config import (
-            Config, EmbyConfig, ScoreAndRegisterConfig,
+            Config, EmbyConfig, RegisterConfig,
             DeviceLimitConfig, APIConfig, SecurityConfig,
             SchedulerConfig, NotificationConfig, TelegramConfig,
             BangumiSyncConfig
@@ -453,7 +410,7 @@ async def update_config_toml():
         Config.update_from_toml("Global")
         EmbyConfig.update_from_toml('Emby')
         TelegramConfig.update_from_toml('Telegram')
-        ScoreAndRegisterConfig.update_from_toml('SAR')
+        RegisterConfig.update_from_toml('SAR')
         DeviceLimitConfig.update_from_toml('DeviceLimit')
         APIConfig.update_from_toml('API')
         SecurityConfig.update_from_toml('Security')
@@ -549,55 +506,26 @@ async def get_config_schema():
             },
             {
                 'key': 'SAR',
-                'title': '积分与注册',
-                'description': '积分系统、注册、签到、自动续期等配置',
+                'title': '注册与用户策略',
+                'description': '注册、用户限制、邀请与 Emby 自由注册配置',
                 'fields': [
-                    {'key': 'score_name', 'label': '积分名称', 'type': 'string', 'description': '积分的显示名称', 'value': ScoreAndRegisterConfig.SCORE_NAME},
-                    {'key': 'register_mode', 'label': '注册模式', 'type': 'bool', 'description': '是否开放注册', 'value': ScoreAndRegisterConfig.REGISTER_MODE},
-                    {'key': 'register_code_limit', 'label': '注册码限制', 'type': 'bool', 'description': '是否限制必须使用注册码注册', 'value': ScoreAndRegisterConfig.REGISTER_CODE_LIMIT},
-                    {'key': 'score_register_mode', 'label': '积分注册', 'type': 'bool', 'description': '是否允许使用积分注册', 'value': ScoreAndRegisterConfig.SCORE_REGISTER_MODE},
-                    {'key': 'score_register_need', 'label': '注册所需积分', 'type': 'int', 'description': '注册或激活账号所需的积分数量', 'value': ScoreAndRegisterConfig.SCORE_REGISTER_NEED},
-                    {'key': 'user_limit', 'label': '用户上限', 'type': 'int', 'description': '系统允许的最大注册用户数量', 'value': ScoreAndRegisterConfig.USER_LIMIT},
-                    {'key': 'max_concurrent_requests_per_user', 'label': '每用户最大同时求片数', 'type': 'int', 'description': '每个用户允许同时存在的待处理或下载中的求片请求数量，-1 表示不限制', 'value': ScoreAndRegisterConfig.MAX_CONCURRENT_REQUESTS_PER_USER},
-                    {'key': 'new_user_notice_status', 'label': '注册通知', 'type': 'bool', 'description': '用户注册/续期/白名单变更时是否发送通知', 'value': ScoreAndRegisterConfig.NEW_USER_NOTICE_STATUS},
-                    {'key': 'new_user_notice_link', 'label': '通知指向主页', 'type': 'bool', 'description': '通知消息是否指向用户个人主页', 'value': ScoreAndRegisterConfig.NEW_USER_NOTICE_LINK},
-                    {'key': 'allow_pending_register', 'label': '允许无码注册', 'type': 'bool', 'description': '是否允许无注册码注册（待激活状态）', 'value': ScoreAndRegisterConfig.ALLOW_PENDING_REGISTER},
-                    {'key': 'pending_register_bonus', 'label': '无码注册赠送', 'type': 'int', 'description': '无码注册时赠送的初始积分', 'value': ScoreAndRegisterConfig.PENDING_REGISTER_BONUS},
-                    {'key': 'allow_no_emby_checkin', 'label': '无Emby签到', 'type': 'bool', 'description': '是否允许未激活 Emby 账户的用户签到', 'value': ScoreAndRegisterConfig.ALLOW_NO_EMBY_CHECKIN},
-                    {'key': 'allow_no_emby_view', 'label': '无Emby查看', 'type': 'bool', 'description': '是否允许未激活 Emby 账户的用户查看部分信息', 'value': ScoreAndRegisterConfig.ALLOW_NO_EMBY_VIEW},
-                    {'key': 'emby_direct_register_enabled', 'label': '开启 Emby 自由注册', 'type': 'bool', 'description': '开启后用户可直接申请 Emby 账号（需先完成 Telegram 绑定）', 'value': ScoreAndRegisterConfig.EMBY_DIRECT_REGISTER_ENABLED},
-                    {'key': 'emby_direct_register_days', 'label': '自由注册开通天数', 'type': 'int', 'description': 'Emby 自由注册成功后默认开通天数', 'value': ScoreAndRegisterConfig.EMBY_DIRECT_REGISTER_DAYS},
-                    {'key': 'emby_direct_register_workers', 'label': '自由注册并发 Worker', 'type': 'int', 'description': '队列并发处理 worker 数（建议 4-16）', 'value': ScoreAndRegisterConfig.EMBY_DIRECT_REGISTER_WORKERS},
-                    {'key': 'emby_direct_register_max_queue', 'label': '自由注册队列上限', 'type': 'int', 'description': '允许排队的最大请求数，超过后直接拒绝', 'value': ScoreAndRegisterConfig.EMBY_DIRECT_REGISTER_MAX_QUEUE},
-                    {'key': 'emby_direct_register_status_ttl', 'label': '注册状态保留秒数', 'type': 'int', 'description': '注册完成后状态保留秒数，便于前端查询结果', 'value': ScoreAndRegisterConfig.EMBY_DIRECT_REGISTER_STATUS_TTL},
-                    {'key': 'admin_uids', 'label': '管理员 UID', 'type': 'string', 'description': '管理员 UID 列表，逗号分隔（如 "1,2,3"）', 'value': ScoreAndRegisterConfig.ADMIN_UIDS},
-                    {'key': 'admin_usernames', 'label': '管理员用户名', 'type': 'string', 'description': '管理员用户名列表，逗号分隔', 'value': ScoreAndRegisterConfig.ADMIN_USERNAMES},
-                    {'key': 'white_list_uids', 'label': '白名单 UID', 'type': 'string', 'description': '白名单 UID 列表，逗号分隔', 'value': ScoreAndRegisterConfig.WHITE_LIST_UIDS},
-                    {'key': 'white_list_usernames', 'label': '白名单用户名', 'type': 'string', 'description': '白名单用户名列表，逗号分隔', 'value': ScoreAndRegisterConfig.WHITE_LIST_USERNAMES},
-                    {'key': 'red_packet_mode', 'label': '红包功能', 'type': 'bool', 'description': '是否启用红包功能', 'value': ScoreAndRegisterConfig.RED_PACKET_MODE},
-                    {'key': 'red_packet_min_amount', 'label': '红包最小金额', 'type': 'int', 'description': '单个红包最小金额', 'value': ScoreAndRegisterConfig.RED_PACKET_MIN_AMOUNT},
-                    {'key': 'red_packet_max_amount', 'label': '红包最大金额', 'type': 'int', 'description': '单个红包最大金额', 'value': ScoreAndRegisterConfig.RED_PACKET_MAX_AMOUNT},
-                    {'key': 'red_packet_min_count', 'label': '红包最小个数', 'type': 'int', 'description': '红包最小拆分个数', 'value': ScoreAndRegisterConfig.RED_PACKET_MIN_COUNT},
-                    {'key': 'red_packet_max_count', 'label': '红包最大个数', 'type': 'int', 'description': '红包最大拆分个数', 'value': ScoreAndRegisterConfig.RED_PACKET_MAX_COUNT},
-                    {'key': 'red_packet_expire_hours', 'label': '红包过期时间', 'type': 'int', 'description': '红包过期时间（小时）', 'value': ScoreAndRegisterConfig.RED_PACKET_EXPIRE_HOURS},
-                    {'key': 'private_transfer_mode', 'label': '转账功能', 'type': 'bool', 'description': '是否启用用户间转账功能', 'value': ScoreAndRegisterConfig.PRIVATE_TRANSFER_MODE},
-                    {'key': 'transfer_min_amount', 'label': '最小转账额', 'type': 'int', 'description': '单次最小转账金额', 'value': ScoreAndRegisterConfig.TRANSFER_MIN_AMOUNT},
-                    {'key': 'transfer_max_amount', 'label': '最大转账额', 'type': 'int', 'description': '单次最大转账金额', 'value': ScoreAndRegisterConfig.TRANSFER_MAX_AMOUNT},
-                    {'key': 'transfer_daily_limit', 'label': '每日转账限额', 'type': 'int', 'description': '每人每日转账限额', 'value': ScoreAndRegisterConfig.TRANSFER_DAILY_LIMIT},
-                    {'key': 'transfer_fee_rate', 'label': '转账手续费率', 'type': 'float', 'description': '转账手续费率（0.05 = 5%）', 'value': ScoreAndRegisterConfig.TRANSFER_FEE_RATE},
-                    {'key': 'checkin_base_score', 'label': '签到基础奖励', 'type': 'int', 'description': '每日签到基础积分奖励', 'value': ScoreAndRegisterConfig.CHECKIN_BASE_SCORE},
-                    {'key': 'checkin_streak_bonus', 'label': '连签加成', 'type': 'int', 'description': '连续签到每天额外加成积分', 'value': ScoreAndRegisterConfig.CHECKIN_STREAK_BONUS},
-                    {'key': 'checkin_max_streak_bonus', 'label': '最大连签加成', 'type': 'int', 'description': '连续签到加成的上限', 'value': ScoreAndRegisterConfig.CHECKIN_MAX_STREAK_BONUS},
-                    {'key': 'checkin_random_min', 'label': '随机奖励最小', 'type': 'int', 'description': '签到随机奖励最小值', 'value': ScoreAndRegisterConfig.CHECKIN_RANDOM_MIN},
-                    {'key': 'checkin_random_max', 'label': '随机奖励最大', 'type': 'int', 'description': '签到随机奖励最大值', 'value': ScoreAndRegisterConfig.CHECKIN_RANDOM_MAX},
-                    {'key': 'auto_renew_enabled', 'label': '自动续期', 'type': 'bool', 'description': '是否允许用户开启积分自动续期', 'value': ScoreAndRegisterConfig.AUTO_RENEW_ENABLED},
-                    {'key': 'auto_renew_days', 'label': '续期天数', 'type': 'int', 'description': '自动续期延长的天数', 'value': ScoreAndRegisterConfig.AUTO_RENEW_DAYS},
-                    {'key': 'auto_renew_cost', 'label': '续期费用', 'type': 'int', 'description': '自动续期扣除的积分', 'value': ScoreAndRegisterConfig.AUTO_RENEW_COST},
-                    {'key': 'auto_renew_before_days', 'label': '提前续期天数', 'type': 'int', 'description': '到期前多少天开始自动续期', 'value': ScoreAndRegisterConfig.AUTO_RENEW_BEFORE_DAYS},
-                    {'key': 'auto_renew_notify', 'label': '续期通知', 'type': 'bool', 'description': '自动续期后是否通知用户', 'value': ScoreAndRegisterConfig.AUTO_RENEW_NOTIFY},
-                    {'key': 'invite_enabled', 'label': '邀请系统', 'type': 'bool', 'description': '是否启用邀请系统', 'value': ScoreAndRegisterConfig.INVITE_ENABLED},
-                    {'key': 'invite_reward', 'label': '邀请奖励', 'type': 'int', 'description': '成功邀请一人的积分奖励', 'value': ScoreAndRegisterConfig.INVITE_REWARD},
-                    {'key': 'invite_limit', 'label': '邀请上限', 'type': 'int', 'description': '每人最多邀请数量（-1 = 无限制）', 'value': ScoreAndRegisterConfig.INVITE_LIMIT},
+                    {'key': 'register_mode', 'label': '注册模式', 'type': 'bool', 'description': '是否开放注册', 'value': RegisterConfig.REGISTER_MODE},
+                    {'key': 'register_code_limit', 'label': '注册码限制', 'type': 'bool', 'description': '是否限制必须使用注册码注册', 'value': RegisterConfig.REGISTER_CODE_LIMIT},
+                    {'key': 'user_limit', 'label': '用户上限', 'type': 'int', 'description': '系统允许的最大注册用户数量', 'value': RegisterConfig.USER_LIMIT},
+                    {'key': 'max_concurrent_requests_per_user', 'label': '每用户最大同时求片数', 'type': 'int', 'description': '每个用户允许同时存在的待处理或下载中的求片请求数量，-1 表示不限制', 'value': RegisterConfig.MAX_CONCURRENT_REQUESTS_PER_USER},
+                    {'key': 'allow_pending_register', 'label': '允许无码注册', 'type': 'bool', 'description': '是否允许无注册码注册（待激活状态）', 'value': RegisterConfig.ALLOW_PENDING_REGISTER},
+                    {'key': 'allow_no_emby_view', 'label': '无Emby查看', 'type': 'bool', 'description': '是否允许未激活 Emby 账户的用户查看部分信息', 'value': RegisterConfig.ALLOW_NO_EMBY_VIEW},
+                    {'key': 'emby_direct_register_enabled', 'label': '开启 Emby 自由注册', 'type': 'bool', 'description': '开启后用户可直接申请 Emby 账号（需先完成 Telegram 绑定）', 'value': RegisterConfig.EMBY_DIRECT_REGISTER_ENABLED},
+                    {'key': 'emby_direct_register_days', 'label': '自由注册开通天数', 'type': 'int', 'description': 'Emby 自由注册成功后默认开通天数', 'value': RegisterConfig.EMBY_DIRECT_REGISTER_DAYS},
+                    {'key': 'emby_direct_register_workers', 'label': '自由注册并发 Worker', 'type': 'int', 'description': '队列并发处理 worker 数（建议 4-16）', 'value': RegisterConfig.EMBY_DIRECT_REGISTER_WORKERS},
+                    {'key': 'emby_direct_register_max_queue', 'label': '自由注册队列上限', 'type': 'int', 'description': '允许排队的最大请求数，超过后直接拒绝', 'value': RegisterConfig.EMBY_DIRECT_REGISTER_MAX_QUEUE},
+                    {'key': 'emby_direct_register_status_ttl', 'label': '注册状态保留秒数', 'type': 'int', 'description': '注册完成后状态保留秒数，便于前端查询结果', 'value': RegisterConfig.EMBY_DIRECT_REGISTER_STATUS_TTL},
+                    {'key': 'admin_uids', 'label': '管理员 UID', 'type': 'string', 'description': '管理员 UID 列表，逗号分隔（如 "1,2,3"）', 'value': RegisterConfig.ADMIN_UIDS},
+                    {'key': 'admin_usernames', 'label': '管理员用户名', 'type': 'string', 'description': '管理员用户名列表，逗号分隔', 'value': RegisterConfig.ADMIN_USERNAMES},
+                    {'key': 'white_list_uids', 'label': '白名单 UID', 'type': 'string', 'description': '白名单 UID 列表，逗号分隔', 'value': RegisterConfig.WHITE_LIST_UIDS},
+                    {'key': 'white_list_usernames', 'label': '白名单用户名', 'type': 'string', 'description': '白名单用户名列表，逗号分隔', 'value': RegisterConfig.WHITE_LIST_USERNAMES},
+                    {'key': 'invite_enabled', 'label': '邀请系统', 'type': 'bool', 'description': '是否启用邀请系统', 'value': RegisterConfig.INVITE_ENABLED},
+                    {'key': 'invite_limit', 'label': '邀请上限', 'type': 'int', 'description': '每人最多邀请数量（-1 = 无限制）', 'value': RegisterConfig.INVITE_LIMIT},
                 ],
             },
             {
@@ -646,7 +574,6 @@ async def get_config_schema():
                     {'key': 'enabled', 'label': '启用定时任务', 'type': 'bool', 'description': '是否启用定时任务系统', 'value': SchedulerConfig.ENABLED},
                     {'key': 'expired_check_time', 'label': '过期检查时间', 'type': 'string', 'description': '检查过期用户的时间（HH:MM 格式）', 'value': SchedulerConfig.EXPIRED_CHECK_TIME},
                     {'key': 'expiring_check_time', 'label': '即将过期检查', 'type': 'string', 'description': '检查即将过期用户的时间（HH:MM 格式）', 'value': SchedulerConfig.EXPIRING_CHECK_TIME},
-                    {'key': 'auto_renew_time', 'label': '自动续期时间', 'type': 'string', 'description': '执行自动续期的时间（HH:MM 格式）', 'value': SchedulerConfig.AUTO_RENEW_TIME},
                     {'key': 'daily_stats_time', 'label': '统计汇总时间', 'type': 'string', 'description': '每日统计汇总的时间（HH:MM 格式）', 'value': SchedulerConfig.DAILY_STATS_TIME},
                     {'key': 'session_cleanup_interval', 'label': '会话清理间隔', 'type': 'int', 'description': '会话清理任务的执行间隔（小时）', 'value': SchedulerConfig.SESSION_CLEANUP_INTERVAL},
                     {'key': 'emby_sync_interval', 'label': 'Emby 同步间隔', 'type': 'int', 'description': 'Emby 用户数据同步的执行间隔（小时）', 'value': SchedulerConfig.EMBY_SYNC_INTERVAL},
@@ -728,7 +655,7 @@ async def update_config_by_schema():
         Config.update_from_toml("Global")
         EmbyConfig.update_from_toml('Emby')
         TelegramConfig.update_from_toml('Telegram')
-        ScoreAndRegisterConfig.update_from_toml('SAR')
+        RegisterConfig.update_from_toml('SAR')
         DeviceLimitConfig.update_from_toml('DeviceLimit')
         APIConfig.update_from_toml('API')
         SecurityConfig.update_from_toml('Security')

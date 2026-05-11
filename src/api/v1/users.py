@@ -32,7 +32,6 @@ async def register():
             "telegram_bind_code": "123456",      // 推荐，注册前先在 Bot 中验证
             "reg_code": "code-xxx",              // 系统账号：注册码注册
             "email": "user@example.com",         // 可选
-            "use_score": false,                    // 系统账号：是否使用积分注册
             "registration_target": "system"      // system | emby
         }
     
@@ -57,7 +56,6 @@ async def register():
     password = data.get('password')  # Web 端用户设置的密码
     reg_code = data.get('reg_code')
     email = data.get('email')
-    use_score = data.get('use_score', False)
     
     # 验证必要参数
     if not username:
@@ -140,12 +138,10 @@ async def register():
         })
 
     # 系统账号注册
-    if use_score:
-        result = await UserService.register_by_score(telegram_id, username, email, password)
-    elif reg_code:
+    if reg_code:
         result = await UserService.register_by_code(telegram_id, username, reg_code, email, password)
     else:
-        # 无码注册（待激活状态，只能签到）
+        # 无码注册（待激活状态）
         result = await UserService.register_pending(telegram_id, username, email, password)
 
     if result.result.value == 'success':
@@ -197,7 +193,7 @@ async def check_registration_available():
             }
         }
     """
-    from src.config import ScoreAndRegisterConfig
+    from src.config import RegisterConfig
     
     available, msg = await UserService.check_registration_available()
     current_count = await UserService.get_registered_user_count()
@@ -206,41 +202,12 @@ async def check_registration_available():
         'available': available,
         'message': msg,
         'current_users': current_count,
-        'max_users': ScoreAndRegisterConfig.USER_LIMIT,
-        'register_mode': ScoreAndRegisterConfig.REGISTER_MODE,
-        'score_register_mode': ScoreAndRegisterConfig.SCORE_REGISTER_MODE,
-        'score_register_need': ScoreAndRegisterConfig.SCORE_REGISTER_NEED,
-        'allow_pending_register': ScoreAndRegisterConfig.ALLOW_PENDING_REGISTER,
-        'emby_direct_register_enabled': ScoreAndRegisterConfig.EMBY_DIRECT_REGISTER_ENABLED,
-        'emby_direct_register_days': ScoreAndRegisterConfig.EMBY_DIRECT_REGISTER_DAYS,
+        'max_users': RegisterConfig.USER_LIMIT,
+        'register_mode': RegisterConfig.REGISTER_MODE,
+        'allow_pending_register': RegisterConfig.ALLOW_PENDING_REGISTER,
+        'emby_direct_register_enabled': RegisterConfig.EMBY_DIRECT_REGISTER_ENABLED,
+        'emby_direct_register_days': RegisterConfig.EMBY_DIRECT_REGISTER_DAYS,
     })
-
-
-@users_bp.route('/me/activate', methods=['POST'])
-@require_auth
-async def activate_my_account():
-    """
-    激活待激活账户（使用积分创建 Emby 账户）
-    
-    需要足够的积分才能激活。
-    
-    Response:
-        {
-            "success": true,
-            "message": "账户激活成功！Emby 密码: xxx，有效期 30 天"
-        }
-    """
-    user = g.current_user
-    
-    # 检查是否已激活
-    if user.EMBYID or user.ACTIVE_STATUS:
-        return api_response(False, "账户已激活", code=400)
-    
-    success, message = await UserService.activate_pending_user(user)
-    
-    if success:
-        return api_response(True, message)
-    return api_response(False, message, code=400)
 
 
 # ==================== 用户信息 ====================
@@ -1021,49 +988,6 @@ async def unbind_my_telegram():
 
 
 
-
-
-# ==================== 自动续期 ====================
-
-@users_bp.route('/me/auto-renew', methods=['GET'])
-@require_auth
-async def get_auto_renew_status():
-    """获取自动续期状态"""
-    from src.services.auto_renew_service import AutoRenewService
-    from src.config import ScoreAndRegisterConfig
-    
-    config = await AutoRenewService.get_auto_renew_info()
-    
-    return api_response(True, "获取成功", {
-        'enabled': g.current_user.AUTO_RENEW,
-        'system_enabled': ScoreAndRegisterConfig.AUTO_RENEW_ENABLED,
-        'config': config,
-    })
-
-
-@users_bp.route('/me/auto-renew', methods=['PUT'])
-@require_auth
-async def set_auto_renew():
-    """
-    设置自动续期开关
-    
-    Request:
-        {
-            "enabled": true
-        }
-    """
-    from src.services.auto_renew_service import AutoRenewService
-    
-    data = request.get_json() or {}
-    enabled = data.get('enabled', False)
-    
-    success, message = await AutoRenewService.set_user_auto_renew(g.current_user.UID, enabled)
-    
-    if success:
-        return api_response(True, message, {'auto_renew': enabled})
-    return api_response(False, message)
-
-
 # ==================== Telegram 绑定码 ====================
 
 # 内存存储绑定码: {code: {type, uid?, username?, created_at, confirmed_telegram_id?}}
@@ -1303,80 +1227,13 @@ async def confirm_tg_bind():
         'expired_at': format_expire_time(user.EXPIRED_AT),
     })
 
-# ==================== 用户积分续期 ====================
-
-@users_bp.route('/me/renew-by-score', methods=['POST'])
-@require_auth
-async def renew_by_score():
-    """
-    使用积分手动续期
-    
-    Request:
-        {
-            "days": 30  // 可选，默认使用配置的天数
-        }
-    """
-    from src.config import ScoreAndRegisterConfig
-    from src.db.score import ScoreOperate
-    
-    if not ScoreAndRegisterConfig.AUTO_RENEW_ENABLED:
-        return api_response(False, "积分续期功能未启用", code=403)
-    
-    data = request.get_json() or {}
-    days = data.get('days', ScoreAndRegisterConfig.AUTO_RENEW_DAYS)
-    cost = ScoreAndRegisterConfig.AUTO_RENEW_COST
-    
-    # 检查积分
-    score = await ScoreOperate.get_score_by_uid(g.current_user.UID)
-    if not score or score.SCORE < cost:
-        return api_response(False, f"积分不足，需要 {cost} {ScoreAndRegisterConfig.SCORE_NAME}", code=400)
-    
-    # 扣除积分
-    score.SCORE -= cost
-    
-    # 更新累计消费
-    if hasattr(score, 'TOTAL_SPENT'):
-        score.TOTAL_SPENT = (score.TOTAL_SPENT or 0) + cost
-    
-    await ScoreOperate.update_score(score)
-    
-    # 续期
-    success, message = await UserService.renew_user(g.current_user, days)
-    
-    if not success:
-        # 退还积分
-        score.SCORE += cost
-        if hasattr(score, 'TOTAL_SPENT'):
-            score.TOTAL_SPENT = (score.TOTAL_SPENT or 0) - cost
-        await ScoreOperate.update_score(score)
-        return api_response(False, message)
-    
-    # 记录积分历史
-    from src.db.score import ScoreHistoryOperate
-    await ScoreHistoryOperate.add_history(
-        uid=g.current_user.UID,
-        type_='renew',
-        amount=-cost,
-        balance_after=score.SCORE,
-        note=f"续期 {days} 天"
-    )
-    
-    user_info = await UserService.get_user_info(g.current_user)
-    return api_response(True, f"续期成功，扣除 {cost} {ScoreAndRegisterConfig.SCORE_NAME}", {
-        'days': days,
-        'cost': cost,
-        'remaining_score': score.SCORE,
-        'expire_status': user_info['expire_status'],
-    })
-
-
 # ==================== 用户设置 ====================
 
 @users_bp.route('/me/settings', methods=['GET'])
 @require_auth
 async def get_my_settings():
     """获取用户所有设置"""
-    from src.config import ScoreAndRegisterConfig, DeviceLimitConfig, Config, EmbyConfig
+    from src.config import RegisterConfig, DeviceLimitConfig, Config, EmbyConfig
     from src.services import EmbyService
     
     user = g.current_user
@@ -1388,7 +1245,6 @@ async def get_my_settings():
 
     return api_response(True, "获取成功", {
         # 用户设置
-        'auto_renew': user.AUTO_RENEW,
         'nsfw_enabled': user.NSFW,
         'nsfw_can_toggle': bool(user.NSFW_ALLOWED),
         'bgm_mode': user.BGM_MODE,
@@ -1409,9 +1265,6 @@ async def get_my_settings():
         },
         # 系统配置
         'system_config': {
-            'auto_renew_enabled': ScoreAndRegisterConfig.AUTO_RENEW_ENABLED,
-            'auto_renew_cost': ScoreAndRegisterConfig.AUTO_RENEW_COST,
-            'auto_renew_days': ScoreAndRegisterConfig.AUTO_RENEW_DAYS,
             'device_limit_enabled': DeviceLimitConfig.DEVICE_LIMIT_ENABLED,
             'max_devices': DeviceLimitConfig.MAX_DEVICES,
             'max_streams': DeviceLimitConfig.MAX_STREAMS,
@@ -1850,8 +1703,6 @@ async def get_my_api_keys():
             'key': masked_key,
             'key_full': key_str,  # 前端需要时返回完整值
             'enabled': key.ENABLED,
-            'allow_checkin': key.ALLOW_CHECKIN,
-            'allow_transfer': key.ALLOW_TRANSFER,
             'allow_query': key.ALLOW_QUERY,
             'rate_limit': key.RATE_LIMIT,
             'request_count': key.REQUEST_COUNT,
@@ -1875,8 +1726,6 @@ async def generate_api_key():
     Request:
         {
             "name": "My API Key",           // 可选，自定义名称
-            "allow_checkin": true,          // 允许签到
-            "allow_transfer": false,        // 是否允许转账
             "allow_query": true,            // 是否允许查询
             "rate_limit": 100,              // 速率限制（请求/小时）
             "expired_at": -1                // 过期时间戳，-1 表示永不过期
@@ -1887,8 +1736,6 @@ async def generate_api_key():
     data = request.get_json() or {}
     
     name = data.get('name')
-    allow_checkin = data.get('allow_checkin', True)
-    allow_transfer = data.get('allow_transfer', False)
     allow_query = data.get('allow_query', True)
     rate_limit = data.get('rate_limit', 100)
     expired_at = data.get('expired_at', -1)
@@ -1901,8 +1748,6 @@ async def generate_api_key():
         api_key = await ApiKeyOperate.create_api_key(
             uid=g.current_user.UID,
             name=name,
-            allow_checkin=allow_checkin,
-            allow_transfer=allow_transfer,
             allow_query=allow_query,
             rate_limit=rate_limit,
             expired_at=expired_at,
@@ -1931,8 +1776,6 @@ async def update_api_key(key_id: int):
         {
             "name": "Updated Name",
             "enabled": true,
-            "allow_checkin": true,
-            "allow_transfer": false,
             "allow_query": true,
             "rate_limit": 100,
             "expired_at": -1
@@ -1952,8 +1795,6 @@ async def update_api_key(key_id: int):
             key_id=key_id,
             name=data.get('name'),
             enabled=data.get('enabled'),
-            allow_checkin=data.get('allow_checkin'),
-            allow_transfer=data.get('allow_transfer'),
             allow_query=data.get('allow_query'),
             rate_limit=data.get('rate_limit'),
             expired_at=data.get('expired_at'),

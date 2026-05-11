@@ -264,22 +264,15 @@ class TelegramConfig(BaseConfig):
     ENABLE_TG_PANEL: bool = False  # 是否开启 TG Bot 完整面板（关闭时仅允许绑定和查看基础信息）
 
 
-class ScoreAndRegisterConfig(BaseConfig):
-    """积分及注册配置管理类"""
-    SCORE_NAME: str = '暮光币'
+class RegisterConfig(BaseConfig):
+    """注册及用户策略配置管理类"""
     REGISTER_MODE: bool = False
     REGISTER_CODE_LIMIT: bool = False  # 是否限制注册码注册
-    SCORE_REGISTER_MODE: bool = False # 是否允许积分注册
-    SCORE_REGISTER_NEED: int = 100  # 注册所需积分/激活所需积分
     USER_LIMIT: int = 200  # 允许的已注册用户数量上限
     MAX_CONCURRENT_REQUESTS_PER_USER: int = -1  # 每个用户允许同时存在的求片请求上限，-1 表示不限制
-    NEW_USER_NOTICE_STATUS: bool = False  # 用户注册/续期/白名单通知开关
-    NEW_USER_NOTICE_LINK: bool = False  # 通知是否指向个人主页
     
     # 无码注册（待激活）配置
     ALLOW_PENDING_REGISTER: bool = True  # 是否允许无码注册（待激活状态）
-    PENDING_REGISTER_BONUS: int = 10  # 无码注册赠送的初始积分
-    ALLOW_NO_EMBY_CHECKIN: bool = True  # 是否允许无 Emby 账户的用户签到
     ALLOW_NO_EMBY_VIEW: bool = True  # 是否允许无 Emby 账户的用户查看部分信息
     EMBY_DIRECT_REGISTER_ENABLED: bool = False  # 是否开启 Emby 自由注册
     EMBY_DIRECT_REGISTER_DAYS: int = 30  # Emby 自由注册默认开通天数
@@ -295,42 +288,12 @@ class ScoreAndRegisterConfig(BaseConfig):
     WHITE_LIST_UIDS: str = ''  # 白名单 UID 列表，逗号分隔（如 "10,11,12"）
     WHITE_LIST_USERNAMES: str = ''  # 白名单用户名列表，逗号分隔（如 "vip1,vip2"）
     
-    # 红包配置
-    RED_PACKET_MODE: bool = False
-    RED_PACKET_MIN_AMOUNT: int = 1  # 红包最小金额
-    RED_PACKET_MAX_AMOUNT: int = 10000  # 红包最大金额
-    RED_PACKET_MIN_COUNT: int = 1  # 红包最小个数
-    RED_PACKET_MAX_COUNT: int = 100  # 红包最大个数
-    RED_PACKET_EXPIRE_HOURS: int = 24  # 红包过期时间（小时）
-    
-    # 转账配置
-    PRIVATE_TRANSFER_MODE: bool = False
-    TRANSFER_MIN_AMOUNT: int = 1  # 最小转账金额
-    TRANSFER_MAX_AMOUNT: int = 10000  # 最大转账金额
-    TRANSFER_DAILY_LIMIT: int = 50000  # 每日转账限额
-    TRANSFER_FEE_RATE: float = 0.0  # 转账手续费率 (0.05 = 5%)
-    
-    # 签到配置
-    CHECKIN_BASE_SCORE: int = 10  # 签到基础奖励
-    CHECKIN_STREAK_BONUS: int = 2  # 连签每天加成
-    CHECKIN_MAX_STREAK_BONUS: int = 20  # 最大连签加成
-    CHECKIN_RANDOM_MIN: int = 0  # 随机奖励最小值
-    CHECKIN_RANDOM_MAX: int = 5  # 随机奖励最大值
-    
-    # 积分自动续期
-    AUTO_RENEW_ENABLED: bool = False  # 是否允许积分自动续期
-    AUTO_RENEW_DAYS: int = 30  # 自动续期天数
-    AUTO_RENEW_COST: int = 100  # 自动续期所需积分
-    AUTO_RENEW_BEFORE_DAYS: int = 3  # 到期前几天自动续期
-    AUTO_RENEW_NOTIFY: bool = True  # 续期后是否通知用户
-    
     # 无 Emby 账户用户自动清理
     AUTO_CLEANUP_NO_EMBY: bool = False  # 是否自动清理没有 Emby 账户的用户
     AUTO_CLEANUP_NO_EMBY_DAYS: int = 7  # 注册后多少天未创建 Emby 账户则自动删除
 
     # 邀请系统
     INVITE_ENABLED: bool = False  # 是否启用邀请系统
-    INVITE_REWARD: int = 50  # 邀请奖励积分
     INVITE_LIMIT: int = 10  # 每人最多邀请数量 (-1 = 无限制)
 
 
@@ -378,7 +341,6 @@ class SchedulerConfig(BaseConfig):
     ENABLED: bool = True
     EXPIRED_CHECK_TIME: str = "03:00"
     EXPIRING_CHECK_TIME: str = "09:00"
-    AUTO_RENEW_TIME: str = "02:00"
     DAILY_STATS_TIME: str = "00:05"
     SESSION_CLEANUP_INTERVAL: int = 6
     EMBY_SYNC_INTERVAL: int = 6
@@ -407,7 +369,7 @@ EmbyConfig.update_from_toml('Emby')
 if isinstance(EmbyConfig.EMBY_NSFW, str):
     EmbyConfig.EMBY_NSFW = [n.strip() for n in EmbyConfig.EMBY_NSFW.split(',') if n.strip()] if EmbyConfig.EMBY_NSFW.strip() else []
 TelegramConfig.update_from_toml('Telegram')
-ScoreAndRegisterConfig.update_from_toml('SAR')
+RegisterConfig.update_from_toml('SAR')
 DeviceLimitConfig.update_from_toml('DeviceLimit')
 APIConfig.update_from_toml('API')
 SecurityConfig.update_from_toml('Security')
@@ -417,7 +379,7 @@ BangumiSyncConfig.update_from_toml('BangumiSync')
 
 # 启动时自动补全缺失的配置项
 _config_classes = [
-    Config, EmbyConfig, TelegramConfig, ScoreAndRegisterConfig,
+    Config, EmbyConfig, TelegramConfig, RegisterConfig,
     DeviceLimitConfig, APIConfig, SecurityConfig,
     SchedulerConfig, NotificationConfig, BangumiSyncConfig,
 ]

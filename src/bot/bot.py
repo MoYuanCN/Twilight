@@ -22,6 +22,26 @@ _bot_instance: Optional['TelegramBot'] = None
 
 
 class TelegramBot:
+        KNOWN_COMMANDS = {
+            "start", "help", "me", "bind", "cancel",
+            "admin", "adduser", "regcode", "broadcast", "stats", "userinfo",
+            "emby", "lines", "resetpwd", "playinfo", "sessions", "kick",
+        }
+
+        KNOWN_CALLBACK_EXACT = {
+            "back_start", "close_msg", "panel_help", "panel_user", "user_tg_info",
+            "user_unbindtg_confirm", "user_playinfo", "panel_admin", "admin_users",
+            "admin_regcode", "admin_stats", "admin_emby", "admin_broadcast",
+            "adm_queryuser", "adm_adduser", "adm_banmenu", "adm_regcode_gen",
+            "adm_regcode_list", "adm_emby_test", "adm_emby_sessions", "adm_emby_users",
+            "adm_emby_cleanup", "adm_emby_cleanup_confirm", "noop", "panel_emby",
+            "emby_lines", "emby_resetpwd", "emby_playinfo",
+        }
+
+        KNOWN_CALLBACK_PREFIX = (
+            "adm_userlist:", "adm_act:", "adm_userdetail:", "adm_renew:", "adm_reggen:",
+        )
+
     """Telegram Bot 主类"""
     
     def __init__(self):
@@ -97,7 +117,7 @@ class TelegramBot:
     
     def _register_handlers(self):
         """注册消息处理器"""
-        from src.bot.handlers import user_handlers, admin_handlers, score_handlers, emby_handlers
+        from src.bot.handlers import user_handlers, admin_handlers, emby_handlers
         
         # 注册用户命令
         user_handlers.register(self)
@@ -105,11 +125,43 @@ class TelegramBot:
         # 注册管理员命令
         admin_handlers.register(self)
         
-        # 注册积分命令
-        score_handlers.register(self)
-        
         # 注册 Emby 命令
         emby_handlers.register(self)
+
+        # 兜底处理：未知命令与过期按钮
+        self.application.add_handler(MessageHandler(filters.COMMAND, self._unknown_command_handler), group=99)
+        self.application.add_handler(CallbackQueryHandler(self._stale_callback_handler), group=99)
+
+    @staticmethod
+    async def _unknown_command_handler(update: Update, context) -> None:
+        """兜底处理未知命令，避免无响应体验"""
+        if not update.message:
+            return
+        text = (update.message.text or "").strip()
+        if not text.startswith("/"):
+            return
+        cmd = text.split()[0].split("@")[0][1:].lower()
+        if cmd in TelegramBot.KNOWN_COMMANDS:
+            return
+        await update.message.reply_text("⚠️ 未知命令，请发送 /help 查看可用命令")
+
+    @staticmethod
+    async def _stale_callback_handler(update: Update, context) -> None:
+        """兜底处理未命中的 callback，通常来自过期按钮"""
+        query = update.callback_query
+        if not query:
+            return
+
+        data = (query.data or "").strip()
+        if data in TelegramBot.KNOWN_CALLBACK_EXACT:
+            return
+        if any(data.startswith(prefix) for prefix in TelegramBot.KNOWN_CALLBACK_PREFIX):
+            return
+
+        try:
+            await query.answer("菜单可能已过期，请发送 /start 刷新", show_alert=True)
+        except Exception:
+            pass
     
     @staticmethod
     async def _error_handler(update: object, context) -> None:

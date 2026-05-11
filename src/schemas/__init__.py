@@ -30,7 +30,6 @@ class UserRegisterRequest:
     username: str
     reg_code: Optional[str] = None
     email: Optional[str] = None
-    use_score: bool = False
 
 
 @dataclass
@@ -44,42 +43,8 @@ class UserInfo:
     active: bool
     expire_status: str
     expired_at: int
-    score: int = 0
-    checkin_days: int = 0
     nsfw_enabled: bool = False
     bgm_mode: bool = False
-
-
-# ==================== 积分相关 ====================
-
-@dataclass
-class CheckinRequest:
-    """签到请求"""
-    telegram_id: int
-
-
-@dataclass
-class TransferRequest:
-    """转账请求"""
-    from_telegram_id: int
-    to_telegram_id: int
-    amount: int
-
-
-@dataclass
-class RedPacketCreateRequest:
-    """创建红包请求"""
-    telegram_id: int
-    amount: int
-    count: int
-    packet_type: int = 1  # 1=随机, 2=均分
-
-
-@dataclass
-class RedPacketGrabRequest:
-    """抢红包请求"""
-    rp_key: str
-    telegram_id: int
 
 
 # ==================== 注册码相关 ====================
@@ -131,10 +96,6 @@ __all__ = [
     'APIResponse',
     'UserRegisterRequest',
     'UserInfo',
-    'CheckinRequest',
-    'TransferRequest',
-    'RedPacketCreateRequest',
-    'RedPacketGrabRequest',
     'RegCodeCreateRequest',
     'RegCodeInfo',
     'BangumiRequireRequest',

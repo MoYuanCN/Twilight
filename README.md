@@ -1,18 +1,12 @@
 <div align="center">
 
-# ！！须知！！
-
- **！！该项目绝大部分由LLM完成，仅有少量人工修改和润色。主贡献者对该项目安全性等不做任何保证，使用前请务必仔细审查代码。
- 如出现问题，本项目不会承担任何责任。请了解以上信息后再决定是否使用。！！**
-
-
 # Twilight 暮光
 
 ## Next Generation Emby/Jellyfin Manager
 
-</div>
+## !!须知!!
 
-<div align="center">
+**该项目绝大部分由 LLM 完成，仅有少量人工修改和润色。主贡献者对该项目安全性等不做任何保证，使用前请务必仔细审查代码。如出现问题，本项目不会承担任何责任。请了解以上信息后再决定是否使用。**
 
 [![Python](https://img.shields.io/badge/Python-3.10+-blue?logo=python&logoColor=white)](https://www.python.org/) [![Flask](https://img.shields.io/badge/Flask-3.x-green?logo=flask&logoColor=white)](https://flask.palletsprojects.com/) [![Next.js](https://img.shields.io/badge/Next.js-16.0+-black?logo=next.js&logoColor=white)](https://nextjs.org/) [![SQLite](https://img.shields.io/badge/SQLite-3-blue?logo=sqlite&logoColor=white)](https://www.sqlite.org/) [![License](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
 
@@ -23,12 +17,11 @@
 ## ✨ 功能特性
 
 | 模块 | 说明 |
-|------|------|
+| ---- | ---- |
 | **Emby/Jellyfin 管理** | 用户注册/续期/禁用、媒体库权限控制、NSFW 独立权限、会话与设备管理、账号绑定 |
-| **积分系统** | 每日签到（连签加成）、积分转账、拼手气/均分红包、积分续期 |
 | **求片功能** | TMDB + Bangumi 多源搜索、库存自动检查（含季度）、请求-审核流程 |
 | **Bangumi 同步** | 支持账号绑定与条目同步能力，便于统一追番状态 |
-| **安全** | 设备数/播放数限制、IP 黑名单、登录日志、API Key 细粒度权限（6 种范围） |
+| **安全** | 设备数/播放数限制、IP 黑名单、登录日志、API Key 细粒度权限（4 种范围） |
 | **Web 管理界面** | 基于 Next.js 16 的响应式 UI，可视化配置编辑器、内置 API 测试工具 |
 | **扩展集成** | RESTful API、API Key 外部接口、可选 Telegram Bot |
 
@@ -98,14 +91,13 @@ bash ./start_all.sh
 
 1. 在 `config.toml` 中配置 Emby 地址、Token，以及管理员用户名
 2. 启动服务后访问 Web 界面注册管理员账号
-3. 在管理后台创建注册码，分发给用户
 
 ---
 
 ## 📚 文档
 
 | 文档 | 说明 |
-|------|------|
+| ---- | ---- |
 | [文档导航](docs/README.md) | 统一入口，按角色快速定位 |
 | [安装部署指南](docs/INSTALL.md) | 安装、配置、部署详细步骤 |
 | [后端 API 文档](docs/BACKEND_API.md) | REST API 接口说明 |
@@ -117,20 +109,10 @@ bash ./start_all.sh
 
 ---
 
-## 🔐 安全与适配说明（2026-05）
-
-- 认证：`require_auth` 已调整为强制 Bearer Token，避免未认证绕过。
-- 用户隐私：用户背景与头像查询接口已增加鉴权与越权检查。
-- 文件安全：头像删除流程已增加路径归一化与目录边界检查，防止路径穿越。
-- Emby 策略：参考 Sakura 的策略更新思路，重写了按媒体库名称显隐的策略更新流程。
-- 性能：管理员用户列表改为数据库侧搜索 + 批量积分查询，减少 N+1 查询。
-- 前端移动端：新增手机端侧滑导航、弹窗宽高自适配、管理用户页面手机卡片布局。
-
----
-
 ## 🙏 鸣谢
 
-- [Emby](https://emby.media/) / [Jellyfin](https://jellyfin.org/)
+- [Emby](https://emby.media/)
+- [Jellyfin](https://jellyfin.org/)
 - [TheMovieDataBase](https://www.themoviedb.org/)
 - [Bangumi 番组计划](https://bgm.tv/)
 - [Next.js](https://nextjs.org/)
@@ -139,7 +121,31 @@ bash ./start_all.sh
 
 ## 📄 许可证 License
 
-本项目基于 [MIT License](LICENSE) 开源，完整条款见项目根目录 `LICENSE`。
+本项目基于 [MIT License](LICENSE) 开源
+
+```License
+MIT License
+
+Copyright (c) 2025 Prejudice Studio
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
 
 ---
 
@@ -147,6 +153,6 @@ bash ./start_all.sh
 
 **如果这个项目对你有帮助，请给一个 ⭐ Star！**
 
-Made with ❤️ by [Prejudice Studio](https://github.com/Prejudice-Studio/)
+**Made with ❤️ by [Prejudice Studio](https://github.com/Prejudice-Studio/)**
 
 </div>

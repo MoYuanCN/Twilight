@@ -138,23 +138,6 @@ export default function SettingsPage() {
     execute: loadData,
   } = useAsyncResource(loadSettingsResource, { immediate: true });
 
-  const handleToggleAutoRenew = async (enabled: boolean) => {
-    try {
-      const res = await api.updateAutoRenew(enabled);
-      if (res.success) {
-        setSettings((prev) => prev ? { ...prev, auto_renew: enabled } : null);
-        toast({
-          title: enabled ? "已开启自动续期" : "已关闭自动续期",
-          variant: "success",
-        });
-      } else {
-        toast({ title: "操作失败", description: res.message, variant: "destructive" });
-      }
-    } catch (error: any) {
-      toast({ title: "操作失败", description: error.message, variant: "destructive" });
-    }
-  };
-
   const handleSaveBgmSettings = async () => {
     if (bgmMode && !bgmToken && !bgmTokenSet) {
       toast({ title: "请输入 Bangumi Token", description: "启用 BGM 同步前需要填写个人 Token", variant: "destructive" });
@@ -881,24 +864,6 @@ export default function SettingsPage() {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-6">
-            {/* Auto Renew */}
-            {settings?.system_config.auto_renew_enabled && (
-              <div className="flex items-center justify-between">
-                <div className="space-y-0.5">
-                  <Label>自动续期</Label>
-                  <p className="text-sm text-muted-foreground">
-                    余额充足时自动使用积分续期（{settings.system_config.auto_renew_cost} 积分/{settings.system_config.auto_renew_days} 天）
-                  </p>
-                </div>
-                <Switch
-                  checked={settings?.auto_renew}
-                  onCheckedChange={handleToggleAutoRenew}
-                />
-              </div>
-            )}
-
-            <Separator />
-
             {/* Bangumi Sync */}
             <div className="space-y-3">
               <div className="flex items-center justify-between">

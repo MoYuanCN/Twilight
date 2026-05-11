@@ -9,8 +9,7 @@ from flask import Blueprint, request, g
 from src.api.v1.auth import require_auth, require_admin, api_response
 from src.db.user import UserOperate, UserModel, Role
 from src.db.regcode import RegCodeOperate
-from src.db.score import ScoreOperate
-from src.services import UserService, ScoreService, EmbyService
+from src.services import UserService, EmbyService
 from src.services.emby import get_emby_client, EmbyError, EmbyConnectionError
 
 logger = logging.getLogger(__name__)
@@ -66,12 +65,7 @@ async def list_users():
     except Exception:
         pass
     
-    user_ids = [user.UID for user in users]
-    score_map = await ScoreOperate.get_scores_by_uids(user_ids)
-
     for user in users:
-        score_record = score_map.get(user.UID)
-        
         # 尝试获取 Telegram 用户名
         telegram_username = None
         if user.TELEGRAM_ID and bot_instance and bot_instance.application:
@@ -94,9 +88,7 @@ async def list_users():
             'expired_at': user.EXPIRED_AT,
             'register_time': user.REGISTER_TIME,
             'last_login_time': user.LAST_LOGIN_TIME,
-            'auto_renew': user.AUTO_RENEW,
             'bgm_mode': user.BGM_MODE,
-            'score': score_record.SCORE if score_record else 0,
         })
     
     return api_response(True, f"共 {len(user_list)} 个用户", {
@@ -116,36 +108,9 @@ async def update_my_info():
     管理员更新自己的信息
     
     Body:
-        score: int - 积分
-        其他字段...
+        暂无可更新字段
     """
-    data = request.get_json() or {}
-    
-    # 只允许管理员修改自己的某些字段
-    allowed_fields = {'score'}  # 可以扩展
-    update_data = {k: v for k, v in data.items() if k in allowed_fields}
-    
-    if not update_data:
-        return api_response(False, "没有可更新的字段", code=400)
-    
-    try:
-        user = await UserOperate.get_user_by_uid(g.current_user.UID)
-        if not user:
-            return api_response(False, "用户不存在", code=404)
-        
-        # 更新积分
-        if 'score' in update_data:
-            from src.db.score import ScoreOperate
-            if not g.current_user.TELEGRAM_ID:
-                return api_response(False, "用户未绑定 Telegram，无法设置积分", code=400)
-            await ScoreOperate.set_score(g.current_user.TELEGRAM_ID, update_data['score'])
-        
-        return api_response(True, "更新成功")
-    except Exception as e:
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.error(f"管理员更新自己信息失败: {e}", exc_info=True)
-        return api_response(False, f"更新失败: {e}", code=500)
+    return api_response(False, "没有可更新的字段", code=400)
 
 
 @admin_bp.route('/users/<int:uid>', methods=['GET'])
@@ -231,7 +196,6 @@ async def update_user(uid: int):
     
     Body:
         role: int - 角色 (0=管理员, 1=普通用户, 2=白名单)
-        score: int - 积分
         emby_id: str - Emby ID
         active: bool - 启用状态
     """
@@ -257,11 +221,6 @@ async def update_user(uid: int):
             if role not in [r.value for r in Role]:
                 return api_response(False, "无效的角色值", code=400)
             target_user.ROLE = role
-        
-        # 更新积分
-        if 'score' in data:
-            from src.db.score import ScoreOperate
-            await ScoreOperate.set_score_by_uid(uid, data['score'])
         
         # 更新 Emby ID
         if 'emby_id' in data:
@@ -618,33 +577,6 @@ async def sync_all_emby():
         'errors': errors,
     })
 
-
-# ==================== 积分管理 ====================
-
-@admin_bp.route('/users/<int:uid>/score', methods=['PUT'])
-@require_auth
-@require_admin
-async def adjust_user_score(uid: int):
-    """
-    调整用户积分
-    
-    Request:
-        {
-            "amount": 100,      // 正数增加，负数扣除
-            "reason": "奖励"
-        }
-    """
-    data = request.get_json() or {}
-    amount = data.get('amount')
-    reason = data.get('reason', '')
-    
-    if amount is None:
-        return api_response(False, "缺少 amount 参数", code=400)
-    
-    success, message = await ScoreService.admin_adjust_score(uid, amount, reason)
-    return api_response(success, message)
-
-
 # ==================== 注册码管理 ====================
 
 @admin_bp.route('/regcodes', methods=['GET'])
@@ -992,7 +924,7 @@ async def create_whitelist_user():
 @require_admin
 async def get_stats():
     """获取系统统计信息"""
-    from src.config import ScoreAndRegisterConfig
+    from src.config import RegisterConfig
     
     registered_count = await UserOperate.get_registered_users_count()
     active_count = await UserOperate.get_active_users_count()
@@ -1003,7 +935,7 @@ async def get_stats():
         'users': {
             'registered': registered_count,
             'active': active_count,
-            'limit': ScoreAndRegisterConfig.USER_LIMIT,
+            'limit': RegisterConfig.USER_LIMIT,
         },
         'regcodes': {
             'active': regcode_count,

@@ -20,7 +20,7 @@ from src.bot.handlers.common import (
     safe_delete_message, GROUP_MSG_DELETE_DELAY,
 )
 from src.db.user import UserOperate, Role
-from src.config import Config, ScoreAndRegisterConfig
+from src.config import Config
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +28,41 @@ logger = logging.getLogger(__name__)
 def register(bot):
     """注册处理器"""
     app = bot.application
+
+    def _build_help_text(panel_on: bool, admin_mode: bool) -> str:
+        lines = [
+            "📚 **命令导航**\n",
+            "**👤 常用功能**",
+            "• /start - 打开主菜单",
+            "• /bind <绑定码> - 绑定 Telegram",
+            "• /me - 查看个人信息",
+            "• /help - 查看帮助",
+        ]
+
+        if panel_on:
+            lines += [
+                "",
+                "**🎬 Emby 功能**",
+                "• /emby - 查看 Emby 服务状态",
+                "• /lines - 查看线路信息",
+                "• /playinfo - 查看播放统计",
+            ]
+
+        if admin_mode:
+            lines += [
+                "",
+                "**🔧 管理员功能**",
+                "• /admin - 打开管理面板",
+                "• /stats - 查看系统统计",
+                "• /cancel - 取消当前输入流程",
+            ]
+
+        lines += [
+            "",
+            "🧭 输入型操作可随时使用 /cancel 取消",
+            "⚠️ 密码重置、注册等敏感操作请在网页端进行",
+        ]
+        return "\n".join(lines)
 
     # ======================== /start 主菜单 ========================
 
@@ -48,14 +83,18 @@ def register(bot):
         user_name = update.effective_user.first_name if update.effective_user else "用户"
         server_name = Config.SERVER_NAME or "Twilight"
         panel_on = is_panel_enabled()
+        admin_mode = is_admin(user_id)
 
         if panel_on:
             text = (
-                f"🌙 **{server_name}**\n\n"
+                f"🌙 **{server_name} 控制中心**\n\n"
                 f"你好，**{escape_markdown(user_name)}**！\n"
                 f"欢迎使用 Emby 管理机器人\n\n"
-                f"请选择功能："
+                f"🧭 推荐先点下方菜单按钮操作"
             )
+            if admin_mode:
+                text += "\n🔧 你拥有管理员权限，可发送 /admin"
+            text += "\n\n请选择功能："
             await update.message.reply_text(
                 text,
                 reply_markup=main_menu_keyboard(user_id),
@@ -63,10 +102,11 @@ def register(bot):
             )
         else:
             text = (
-                f"🌙 **{server_name}**\n\n"
+                f"🌙 **{server_name} 控制中心**\n\n"
                 f"你好，**{escape_markdown(user_name)}**！\n"
                 f"欢迎使用 Emby 管理机器人\n\n"
                 "可用命令：\n"
+                "• /start \\- 打开主菜单\n"
                 "• /help \\- 帮助信息\n"
                 "• /bind <绑定码> \\- 绑定 Telegram\n"
                 "• /me \\- 查看个人信息"
@@ -112,30 +152,7 @@ def register(bot):
         if not panel_on:
             await safe_edit_message(query.message, "⚠️ TG 面板未开启\n\n可用命令: /help /bind /me")
             return
-        lines = [
-            "📋 **帮助**\n",
-            "**👤 基础功能**",
-            "• /start - 主菜单",
-            "• /bind <绑定码> - 绑定 Telegram",
-            "• /me - 查看个人信息",
-        ]
-        if panel_on:
-            lines += [
-                "",
-                "**💰 积分**",
-                "• /checkin - 每日签到",
-                "• /transfer <用户名> <金额> - 转账",
-                "",
-                "**🎬 Emby**",
-                "• /lines - 查看线路",
-            ]
-        lines += [
-            "",
-            "⚠️ 密码重置、注册等敏感操作请在网页端进行",
-            "",
-            "💡 大部分功能可通过主菜单按钮操作",
-        ]
-        text = "\n".join(lines)
+        text = _build_help_text(panel_on=panel_on, admin_mode=is_admin(user_id))
         kb = InlineKeyboardMarkup([[back_button()]])
         await safe_edit_message(query.message, text, reply_markup=kb)
 
@@ -143,27 +160,8 @@ def register(bot):
     async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         """帮助命令"""
         panel_on = is_panel_enabled()
-        lines = [
-            "📋 **帮助**\n",
-            "**👤 基础功能**",
-            "• /start - 主菜单",
-            "• /bind <绑定码> - 绑定 Telegram",
-            "• /me - 查看个人信息",
-        ]
-        if panel_on:
-            lines += [
-                "",
-                "**💰 积分**",
-                "• /checkin - 每日签到",
-                "",
-                "**🎬 Emby**",
-                "• /lines - 查看线路",
-            ]
-        lines += [
-            "",
-            "⚠️ 密码重置、注册等敏感操作请在网页端进行",
-        ]
-        text = "\n".join(lines)
+        user_id = update.effective_user.id if update.effective_user else 0
+        text = _build_help_text(panel_on=panel_on, admin_mode=is_admin(user_id))
         if panel_on:
             kb = InlineKeyboardMarkup([[back_button()]])
             await update.message.reply_text(text, reply_markup=kb, parse_mode="Markdown")
@@ -180,15 +178,9 @@ def register(bot):
         query = update.callback_query
         await answer_callback_safe(query)
 
-        from src.db.score import ScoreOperate
-        score = await ScoreOperate.get_score_by_uid(user.UID)
-        balance = score.SCORE if score else 0
-        score_name = ScoreAndRegisterConfig.SCORE_NAME
-
         text = (
             f"👤 **个人中心**\n\n"
-            f"{format_user_info(user)}\n"
-            f"💰 **{score_name}**: {balance}"
+            f"{format_user_info(user)}"
         )
 
         panel_on = is_panel_enabled()
@@ -211,14 +203,9 @@ def register(bot):
     @require_registered
     async def cmd_me(update: Update, context: ContextTypes.DEFAULT_TYPE, user=None, **kwargs):
         """查看个人信息（命令版，始终可用）"""
-        from src.db.score import ScoreOperate
-        score = await ScoreOperate.get_score_by_uid(user.UID)
-        balance = score.SCORE if score else 0
-        score_name = ScoreAndRegisterConfig.SCORE_NAME
         text = (
             f"👤 **个人中心**\n\n"
-            f"{format_user_info(user)}\n"
-            f"💰 **{score_name}**: {balance}"
+            f"{format_user_info(user)}"
         )
         user_id = update.effective_user.id if update.effective_user else 0
         panel_on = is_panel_enabled()
@@ -335,8 +322,13 @@ def register(bot):
         bind_code = context.args[0].strip()
 
         import requests
-        from src.config import TelegramConfig, APIConfig
-        bot_secret = TelegramConfig.BOT_TOKEN[:20] if TelegramConfig.BOT_TOKEN else ''
+        from src.config import SecurityConfig, APIConfig
+        bot_secret = (SecurityConfig.BOT_INTERNAL_SECRET or '').strip()
+        if not bot_secret:
+            await update.message.reply_text("❌ Bot 内部密钥未配置，请联系管理员检查 Security.bot_internal_secret")
+            logger.error("TG 绑定失败: 未配置 Security.bot_internal_secret")
+            return
+
         port = getattr(APIConfig, 'PORT', 5000)
         api_url = f"http://127.0.0.1:{port}/api/v1/users/me/telegram/bind-confirm"
 

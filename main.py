@@ -16,7 +16,7 @@ import logging
 import sys
 
 from src import __version__
-from src.config import Config, ScoreAndRegisterConfig, TelegramConfig, APIConfig
+from src.config import Config, RegisterConfig, TelegramConfig, APIConfig
 from src.core.utils import setup_logging, format_duration
 
 logger = logging.getLogger(__name__)

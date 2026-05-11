@@ -14,7 +14,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
-from src.config import Config, ScoreAndRegisterConfig
+from src.config import Config, RegisterConfig
 from src.db.user import UserOperate
 from src.services.user_service import RegisterResult, UserService
 
@@ -52,16 +52,16 @@ class EmbyRegisterQueueService:
 
     @classmethod
     def _status_ttl(cls) -> int:
-        return max(60, int(ScoreAndRegisterConfig.EMBY_DIRECT_REGISTER_STATUS_TTL or 1800))
+        return max(60, int(RegisterConfig.EMBY_DIRECT_REGISTER_STATUS_TTL or 1800))
 
     @classmethod
     def _worker_count(cls) -> int:
-        configured = int(ScoreAndRegisterConfig.EMBY_DIRECT_REGISTER_WORKERS or 8)
+        configured = int(RegisterConfig.EMBY_DIRECT_REGISTER_WORKERS or 8)
         return min(max(configured, 1), 32)
 
     @classmethod
     def _queue_max_size(cls) -> int:
-        configured = int(ScoreAndRegisterConfig.EMBY_DIRECT_REGISTER_MAX_QUEUE or 1000)
+        configured = int(RegisterConfig.EMBY_DIRECT_REGISTER_MAX_QUEUE or 1000)
         return min(max(configured, 10), 10000)
 
     @classmethod
@@ -118,7 +118,7 @@ class EmbyRegisterQueueService:
         password: Optional[str] = None,
     ) -> tuple[Optional[Dict[str, Any]], str]:
         """提交 Emby 注册请求。"""
-        if not ScoreAndRegisterConfig.EMBY_DIRECT_REGISTER_ENABLED:
+        if not RegisterConfig.EMBY_DIRECT_REGISTER_ENABLED:
             return None, "Emby 自由注册未开启"
 
         await cls.ensure_started()
@@ -162,8 +162,8 @@ class EmbyRegisterQueueService:
 
             # 快速容量检查：已注册人数 + 排队中人数不超过上限
             pending_count = len(cls._pending_by_username)
-            if current_count + pending_count >= ScoreAndRegisterConfig.USER_LIMIT:
-                return None, f"已达到用户数量上限 ({ScoreAndRegisterConfig.USER_LIMIT})"
+            if current_count + pending_count >= RegisterConfig.USER_LIMIT:
+                return None, f"已达到用户数量上限 ({RegisterConfig.USER_LIMIT})"
 
             request_id = f"erq_{secrets.token_hex(8)}"
             status_token = secrets.token_urlsafe(20)

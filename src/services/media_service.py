@@ -740,7 +740,7 @@ class MediaRequestService:
                 return False, f"该媒体{season_str}已被请求过（{status_msg}）", existing.id
 
         # 检查当前用户的并发求片数量
-        from src.config import ScoreAndRegisterConfig
+        from src.config import RegisterConfig
         current_requests = await BangumiRequireOperate.get_all_requires_by_user(telegram_id)
         active_count = sum(
             1
@@ -751,7 +751,7 @@ class MediaRequestService:
                 ReqStatus.DOWNLOADING.value,
             }
         )
-        max_concurrent = ScoreAndRegisterConfig.MAX_CONCURRENT_REQUESTS_PER_USER
+        max_concurrent = RegisterConfig.MAX_CONCURRENT_REQUESTS_PER_USER
         if max_concurrent > 0 and active_count >= max_concurrent:
             return (
                 False,

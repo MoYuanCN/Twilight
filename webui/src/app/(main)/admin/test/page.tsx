@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Activity, Database, Loader2, RefreshCw, Server, ShieldCheck, XCircle } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -10,11 +10,7 @@ import { useToast } from "@/hooks/use-toast";
 
 const FEATURE_LABELS: Record<string, string> = {
   register: "开放注册",
-  score_register: "积分注册",
   telegram: "Telegram Bot",
-  red_packet: "红包功能",
-  transfer: "转账功能",
-  auto_renew: "自动续期",
   invite: "邀请系统",
   force_bind_telegram: "强制绑定 Telegram",
 };
@@ -28,23 +24,6 @@ interface SystemHealthInfo {
   api: boolean;
   database: boolean;
   emby: boolean;
-}
-
-interface SystemStatsInfo {
-  timestamp: number;
-  cpu_count: number | null;
-  cpu_percent?: number | null;
-  memory?: {
-    total: number;
-    available: number;
-    percent: number;
-    used: number;
-  } | null;
-  disk?: {
-    total: number;
-    free: number;
-    percent: number;
-  } | null;
 }
 
 interface ExtendedSystemStats extends SystemStats {
@@ -73,12 +52,13 @@ export default function AdminStatusPage() {
   const [health, setHealth] = useState<SystemHealthInfo | null>(null);
   const [info, setInfo] = useState<any>(null);
   const [stats, setStats] = useState<ExtendedSystemStats | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const loadStatus = async () => {
+  const loadStatus = useCallback(async () => {
     setLoading(true);
     setError(null);
+
     try {
       const [healthRes, infoRes, statsRes] = await Promise.all([
         api.getSystemHealth(),
@@ -87,7 +67,7 @@ export default function AdminStatusPage() {
       ]);
 
       if (!healthRes.success) {
-        throw new Error(healthRes.message || "健康检查失败");
+        throw new Error(healthRes.message || "健康检查获取失败");
       }
       if (!infoRes.success) {
         throw new Error(infoRes.message || "系统信息获取失败");
@@ -106,11 +86,11 @@ export default function AdminStatusPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [toast]);
 
   useEffect(() => {
     void loadStatus();
-  }, []);
+  }, [loadStatus]);
 
   const renderStatusItem = (flag: boolean | undefined, label: string) => {
     const healthy = Boolean(flag);
@@ -181,7 +161,7 @@ export default function AdminStatusPage() {
               <Server className="h-5 w-5" />
               系统与架构
             </CardTitle>
-            <CardDescription>展示当前服务版本、功能开关、计费策略与运行限制。</CardDescription>
+            <CardDescription>展示当前服务版本、功能开关与运行限制。</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             {info ? (
@@ -195,29 +175,10 @@ export default function AdminStatusPage() {
                     <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">版本</p>
                     <p className="mt-2 text-base font-semibold text-foreground">{info.version ?? "未知"}</p>
                   </div>
-                  <div className="rounded-xl border border-muted/70 bg-background/80 p-4">
+                  <div className="rounded-xl border border-muted/70 bg-background/80 p-4 sm:col-span-2">
                     <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">图标</p>
                     <p className="mt-2 text-base font-semibold text-foreground">{info.icon || "无"}</p>
                   </div>
-                  {info.score && (
-                    <div className="rounded-xl border border-muted/70 bg-background/80 p-4">
-                      <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">计费策略</p>
-                      <div className="mt-2 space-y-2 text-sm text-muted-foreground">
-                        <div className="flex items-center justify-between gap-2">
-                          <span>名称</span>
-                          <span>{info.score.name ?? "未知"}</span>
-                        </div>
-                        <div className="flex items-center justify-between gap-2">
-                          <span>自动续期费用</span>
-                          <span>{info.score.auto_renew_cost ?? "未知"}</span>
-                        </div>
-                        <div className="flex items-center justify-between gap-2">
-                          <span>注册需积分</span>
-                          <span>{info.score.register_need ?? "未知"}</span>
-                        </div>
-                      </div>
-                    </div>
-                  )}
                 </div>
 
                 <div className="rounded-xl border border-muted/70 bg-background/80 p-4">
@@ -344,43 +305,6 @@ export default function AdminStatusPage() {
           </CardContent>
         </Card>
       </div>
-
-      <Card className="glass-card">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Database className="h-5 w-5" />
-            详细调试数据
-          </CardTitle>
-          <CardDescription>以可视化方式展示系统健康与原始调试 JSON。</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {health && info && stats ? (
-            <div className="space-y-4">
-              <div className="rounded-xl border border-muted/70 bg-background/80 p-4">
-                <p className="text-sm font-medium text-foreground">健康状态</p>
-                <div className="mt-3 space-y-2">
-                  {([['API 服务', health.api], ['数据库', health.database], ['Emby 服务', health.emby]] as const).map(([label, ok]) => (
-                    <div key={label} className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2 bg-muted/40">
-                      <span className="text-sm text-muted-foreground">{label}</span>
-                      <Badge variant={ok ? 'success' : 'destructive'}>{ok ? '正常' : '异常'}</Badge>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <details className="rounded-xl border border-muted/70 bg-muted/40 p-4">
-                <summary className="cursor-pointer text-sm font-medium text-foreground">查看原始 JSON</summary>
-                <pre className="mt-3 max-h-[320px] overflow-auto whitespace-pre-wrap text-xs text-muted-foreground">
-                  {JSON.stringify({ health, info, stats }, null, 2)}
-                </pre>
-              </details>
-            </div>
-          ) : (
-            <p className="text-sm text-muted-foreground">正在加载详细信息...</p>
-          )}
-        </CardContent>
-      </Card>
     </div>
   );
 }
-

@@ -78,7 +78,7 @@ Authorization: ApiKey <api_key>
 ## 3. 错误码
 
 | HTTP 状态码 | 含义 |
-|------------|------|
+| ---------- | ---- |
 | 200 | 请求成功 |
 | 400 | 参数错误 / 请求格式不合法 |
 | 401 | 未认证 / Token 或 API Key 无效 |
@@ -89,10 +89,9 @@ Authorization: ApiKey <api_key>
 ## 4. 模块总览
 
 | 模块 | 路径前缀 | 说明 |
-|------|----------|------|
+| ---- | -------- | ---- |
 | Auth | `/auth` | 登录、会话、Token 刷新、API Key 管理 |
 | Users | `/users` | 注册、个人信息、Emby 绑定、续期、设备、Telegram |
-| Score | `/score` | 积分、签到、转账、红包 |
 | Media | `/media` | TMDB/Bangumi 搜索、求片、库存管理 |
 | Emby | `/emby` | Emby 账号状态、库、搜索、会话 |
 | Admin | `/admin` | 管理用户、Emby 同步、注册码、广播 |
@@ -247,7 +246,7 @@ curl -X GET "http://localhost:5000/api/v1/auth/apikey/permissions" \
 
 ```json
 {
-  "permissions": ["account:read", "score:read"]
+  "permissions": ["account:read", "emby:read"]
 }
 ```
 
@@ -257,7 +256,7 @@ curl -X GET "http://localhost:5000/api/v1/auth/apikey/permissions" \
 curl -X PUT "http://localhost:5000/api/v1/auth/apikey/permissions" \
   -H "Authorization: Bearer <token>" \
   -H "Content-Type: application/json" \
-  -d '{"permissions":["account:read","score:read"]}'
+  -d '{"permissions":["account:read","emby:read"]}'
 ```
 
 ## 6. Users 模块
@@ -489,17 +488,17 @@ curl -X PUT "http://localhost:5000/api/v1/users/me/nsfw" \
 
 ### 6.4 续期与授权码
 
-#### 续期用户
+#### 管理员续期用户
 
 `POST /users/me/renew`
 
-- 说明：已激活用户续期
+- 说明：使用续期码续期账号
 - 认证：登录 Token
 - 请求体：
 
 ```json
 {
-  "days": 30
+  "reg_code": "code-abc123"
 }
 ```
 
@@ -509,7 +508,7 @@ curl -X PUT "http://localhost:5000/api/v1/users/me/nsfw" \
 curl -X POST "http://localhost:5000/api/v1/users/me/renew" \
   -H "Authorization: Bearer <token>" \
   -H "Content-Type: application/json" \
-  -d '{"days":30}'
+  -d '{"reg_code":"code-abc123"}'
 ```
 
 #### 使用注册码 / 续期码
@@ -533,29 +532,6 @@ curl -X POST "http://localhost:5000/api/v1/users/me/use-code" \
   -H "Authorization: Bearer <token>" \
   -H "Content-Type: application/json" \
   -d '{"reg_code":"code-abc123"}'
-```
-
-#### 使用积分续期
-
-`POST /users/me/renew-by-score`
-
-- 说明：使用积分续期
-- 认证：登录 Token
-- 请求体：
-
-```json
-{
-  "score": 1000
-}
-```
-
-- 示例 cURL：
-
-```bash
-curl -X POST "http://localhost:5000/api/v1/users/me/renew-by-score" \
-  -H "Authorization: Bearer <token>" \
-  -H "Content-Type: application/json" \
-  -d '{"score":1000}'
 ```
 
 ### 6.5 设备与登录历史
@@ -687,166 +663,7 @@ curl -X GET "http://localhost:5000/api/v1/users/me/settings" \
   -H "Authorization: Bearer <token>"
 ```
 
-## 7. Score 模块
-
-### 获取积分余额
-
-`GET /score/balance`
-
-- 说明：获取积分余额
-- 认证：登录 Token
-
-- 示例 cURL：
-
-```bash
-curl -X GET "http://localhost:5000/api/v1/score/balance" \
-  -H "Authorization: Bearer <token>"
-```
-
-### 获取积分信息
-
-`GET /score/info`
-
-- 说明：获取积分基本信息与签到状态
-- 认证：登录 Token
-
-- 示例 cURL：
-
-```bash
-curl -X GET "http://localhost:5000/api/v1/score/info" \
-  -H "Authorization: Bearer <token>"
-```
-
-### 每日签到
-
-`POST /score/checkin`
-
-- 说明：每日签到
-- 认证：登录 Token
-
-- 示例 cURL：
-
-```bash
-curl -X POST "http://localhost:5000/api/v1/score/checkin" \
-  -H "Authorization: Bearer <token>"
-```
-
-### 获取积分历史
-
-`GET /score/history?page=1&per_page=20&type=checkin`
-
-- 说明：获取积分历史，支持 `page`、`per_page`、`type`
-- 认证：登录 Token
-
-- 示例 cURL：
-
-```bash
-curl -X GET "http://localhost:5000/api/v1/score/history?page=1&per_page=20&type=checkin" \
-  -H "Authorization: Bearer <token>"
-```
-
-### 转账给其他用户
-
-`POST /score/transfer`
-
-- 说明：转账给其他用户
-- 认证：登录 Token
-- 请求体：
-
-```json
-{
-  "target_uid": 123,
-  "amount": 500,
-  "note": "感谢帮忙"
-}
-```
-
-- 示例 cURL：
-
-```bash
-curl -X POST "http://localhost:5000/api/v1/score/transfer" \
-  -H "Authorization: Bearer <token>" \
-  -H "Content-Type: application/json" \
-  -d '{"target_uid":123,"amount":500,"note":"感谢帮忙"}'
-```
-
-### 获取积分规则配置
-
-`GET /score/config`
-
-- 说明：获取积分规则配置
-- 认证：登录 Token
-
-- 示例 cURL：
-
-```bash
-curl -X GET "http://localhost:5000/api/v1/score/config" \
-  -H "Authorization: Bearer <token>"
-```
-
-### 创建红包
-
-`POST /score/redpacket`
-
-- 说明：创建红包
-- 认证：登录 Token
-- 请求体：
-
-```json
-{
-  "total_amount": 1000,
-  "count": 10,
-  "message": "春季活动"
-}
-```
-
-- 示例 cURL：
-
-```bash
-curl -X POST "http://localhost:5000/api/v1/score/redpacket" \
-  -H "Authorization: Bearer <token>" \
-  -H "Content-Type: application/json" \
-  -d '{"total_amount":1000,"count":10,"message":"春季活动"}'
-```
-
-### 抢红包
-
-`POST /score/redpacket/<rp_key>/grab`
-
-- 说明：抢红包
-- 认证：登录 Token
-
-- 示例 cURL：
-
-```bash
-curl -X POST "http://localhost:5000/api/v1/score/redpacket/abc123/grab" \
-  -H "Authorization: Bearer <token>"
-```
-
-### 提现红包
-
-`POST /score/redpacket/<rp_key>/withdraw`
-
-- 说明：提现红包
-- 认证：登录 Token
-- 请求体：
-
-```json
-{
-  "amount": 100
-}
-```
-
-- 示例 cURL：
-
-```bash
-curl -X POST "http://localhost:5000/api/v1/score/redpacket/abc123/withdraw" \
-  -H "Authorization: Bearer <token>" \
-  -H "Content-Type: application/json" \
-  -d '{"amount":100}'
-```
-
-## 8. Media 模块
+## 7. Media 模块
 
 ### 通用媒体搜索
 
@@ -1113,7 +930,7 @@ curl -X DELETE "http://localhost:5000/api/v1/media/request/123" \
   -H "Authorization: Bearer <token>"
 ```
 
-## 9. Emby 模块
+## 8. Emby 模块
 
 ### 查询当前用户 Emby 状态
 
@@ -1199,9 +1016,9 @@ curl -X GET "http://localhost:5000/api/v1/emby/sessions/count" \
   -H "Authorization: Bearer <token>"
 ```
 
-## 10. Admin 模块
+## 9. Admin 模块
 
-### 10.1 用户管理
+### 9.1 用户管理
 
 #### 查询用户列表
 
@@ -1380,7 +1197,7 @@ curl -X GET "http://localhost:5000/api/v1/admin/users/by-telegram/987654321" \
   -H "Authorization: Bearer <admin_token>"
 ```
 
-### 10.2 Emby 管理
+### 9.2 Emby 管理
 
 #### 同步所有 Emby 用户数据
 
@@ -1394,7 +1211,7 @@ curl -X POST "http://localhost:5000/api/v1/admin/emby/sync" \
   -H "Authorization: Bearer <admin_token>"
 ```
 
-#### 获取 Emby 媒体库列表
+#### 获取 Emby 媒体库列表（Admin 模块）
 
 `GET /admin/emby/libraries`
 
@@ -1407,7 +1224,7 @@ curl -X GET "http://localhost:5000/api/v1/admin/emby/libraries" \
   -H "Authorization: Bearer <admin_token>"
 ```
 
-### 10.3 规则与配置
+### 9.3 规则与配置
 
 #### 查询注册码列表
 
@@ -1626,7 +1443,7 @@ curl -X POST "http://localhost:5000/api/v1/admin/users/cleanup-invalid" \
   -H "Authorization: Bearer <admin_token>"
 ```
 
-## 11. Stats 模块
+## 10. Stats 模块
 
 ### 当前用户统计
 
@@ -1667,7 +1484,7 @@ curl -X GET "http://localhost:5000/api/v1/stats/user/123" \
   -H "Authorization: Bearer <token>"
 ```
 
-## 12. System 模块
+## 11. System 模块
 
 ### 健康检查
 
@@ -1802,7 +1619,7 @@ curl -X GET "http://localhost:5000/api/v1/system/admin/apis" \
   -H "Authorization: Bearer <admin_token>"
 ```
 
-### 获取 Emby 媒体库列表
+### 获取 Emby 媒体库列表（System 模块）
 
 `GET /system/admin/emby/libraries`
 
@@ -1816,13 +1633,13 @@ curl -X GET "http://localhost:5000/api/v1/system/admin/emby/libraries" \
   -H "Authorization: Bearer <admin_token>"
 ```
 
-## 13. 附录
+## 12. 附录
 
-### 13.1 API Key 文档
+### 12.1 API Key 文档
 
 API Key 相关接口请参考 `docs/API_KEY_API.md`。
 
-### 13.2 说明
+### 12.2 说明
 
 - 管理员接口需要管理员登录 Token。
 - 外部系统推荐使用 API Key 访问 `/api/v1/apikey/*`。

@@ -17,7 +17,6 @@ import {
   ChevronRight,
   ChevronDown,
   Edit,
-  Coins,
   UserX,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -81,7 +80,6 @@ export default function AdminUsersPage() {
   const [editOpen, setEditOpen] = useState(false);
   const [editForm, setEditForm] = useState({
     role: 1,
-    score: 0,
     emby_id: "",
     active: true,
   });
@@ -235,7 +233,6 @@ export default function AdminUsersPage() {
     setSelectedUser(user);
     setEditForm({
       role: user.role,
-      score: user.score || 0,
       emby_id: user.emby_id || "",
       active: user.active,
     });
@@ -513,10 +510,6 @@ export default function AdminUsersPage() {
                         {user.expired_at ? formatDate(user.expired_at) : "永久"}
                       </p>
                     </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground">积分</p>
-                      <p className="mt-1 font-medium">{user.score || 0}</p>
-                    </div>
                   </div>
 
                   {(user.telegram_id || user.emby_id) && (
@@ -541,7 +534,6 @@ export default function AdminUsersPage() {
                     <th className="px-4 py-3 text-left text-sm font-medium">角色</th>
                     <th className="px-4 py-3 text-left text-sm font-medium">状态</th>
                     <th className="px-4 py-3 text-left text-sm font-medium">到期时间</th>
-                    <th className="px-4 py-3 text-left text-sm font-medium">积分</th>
                     <th className="px-4 py-3 text-right text-sm font-medium">操作</th>
                   </tr>
                 </thead>
@@ -594,14 +586,13 @@ export default function AdminUsersPage() {
                           <span className="text-emerald-500">永久</span>
                         )}
                       </td>
-                      <td className="px-4 py-3 font-medium">{user.score || 0}</td>
                       <td className="px-4 py-3 text-right">
                         {renderUserActions(user)}
                       </td>
                     </tr>
                     {expandedUserIds.has(user.uid) && (
                       <tr className="bg-muted/10">
-                        <td colSpan={6} className="px-4 py-3 text-sm text-muted-foreground">
+                        <td colSpan={5} className="px-4 py-3 text-sm text-muted-foreground">
                           <div className="grid gap-3 sm:grid-cols-2">
                             <div>
                               <p className="font-medium">更多信息</p>
@@ -611,7 +602,6 @@ export default function AdminUsersPage() {
                             <div>
                               <p className="font-medium">账号详情</p>
                               <p>Emby ID: {user.emby_id || "未绑定"}</p>
-                              <p>自动续期: {user.auto_renew ? "已开启" : "未开启"}</p>
                               <p>BGM 模式: {user.bgm_mode ? "已开启" : "未开启"}</p>
                             </div>
                           </div>
@@ -679,17 +669,6 @@ export default function AdminUsersPage() {
                 </SelectContent>
               </Select>
             </div>
-
-            <div className="space-y-2">
-              <Label>积分</Label>
-              <Input
-                type="number"
-                placeholder="输入积分"
-                value={editForm.score}
-                onChange={(e) => setEditForm({ ...editForm, score: parseInt(e.target.value) || 0 })}
-              />
-            </div>
-
             <div className="space-y-2">
               <Label>Emby ID（可选）</Label>
               <Input

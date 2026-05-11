@@ -7,7 +7,6 @@ from flask import Blueprint
 
 from src.api.v1.auth import auth_bp
 from src.api.v1.users import users_bp
-from src.api.v1.score import score_bp
 from src.api.v1.emby import emby_bp
 from src.api.v1.admin import admin_bp
 from src.api.v1.media import media_bp
@@ -29,7 +28,6 @@ def register_v1_blueprints(app):
     """
     app.register_blueprint(auth_bp, url_prefix='/api/v1/auth')
     app.register_blueprint(users_bp, url_prefix='/api/v1/users')
-    app.register_blueprint(score_bp, url_prefix='/api/v1/score')
     app.register_blueprint(emby_bp, url_prefix='/api/v1/emby')
     app.register_blueprint(admin_bp, url_prefix='/api/v1/admin')
     app.register_blueprint(media_bp, url_prefix='/api/v1/media')
@@ -45,7 +43,6 @@ __all__ = [
     'register_v1_blueprints',
     'auth_bp',
     'users_bp',
-    'score_bp',
     'emby_bp',
     'admin_bp',
     'media_bp',

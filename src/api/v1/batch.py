@@ -106,35 +106,6 @@ async def batch_delete_users():
     return api_response(True, f"操作完成: 成功 {result['success']}, 失败 {result['failed']}", result)
 
 
-@batch_bp.route('/users/score', methods=['POST'])
-@require_auth
-@require_admin
-async def batch_adjust_score():
-    """
-    批量调整积分
-    
-    Request:
-        {
-            "uids": [1, 2, 3],
-            "amount": 100,  // 正数增加，负数扣除
-            "reason": "活动奖励"
-        }
-    """
-    data = request.get_json() or {}
-    uids = data.get('uids', [])
-    amount = data.get('amount', 0)
-    reason = data.get('reason', '')
-    
-    if not uids:
-        return api_response(False, "请提供用户 UID 列表", code=400)
-    
-    if amount == 0:
-        return api_response(False, "调整数量不能为 0", code=400)
-    
-    result = await BatchOperationService.batch_adjust_score(uids, amount, reason)
-    return api_response(True, f"操作完成: 成功 {result['success']}, 失败 {result['failed']}", result)
-
-
 # ==================== 数据导出 ====================
 
 @batch_bp.route('/export/users', methods=['GET'])
@@ -146,26 +117,24 @@ async def export_users():
     
     Query:
         format: csv/json (默认 csv)
-        include_score: bool (默认 true)
         include_playback: bool (默认 false)
         active_only: bool (默认 false)
     """
     from flask import Response
     
     fmt = request.args.get('format', 'csv')
-    include_score = request.args.get('include_score', 'true').lower() == 'true'
     include_playback = request.args.get('include_playback', 'false').lower() == 'true'
     active_only = request.args.get('active_only', 'false').lower() == 'true'
     
     if fmt == 'json':
-        data = await DataExportService.export_users_json(include_score)
+        data = await DataExportService.export_users_json()
         return Response(
             data,
             mimetype='application/json',
             headers={'Content-Disposition': 'attachment; filename=users.json'}
         )
     else:
-        data = await DataExportService.export_users_csv(include_score, include_playback, active_only)
+        data = await DataExportService.export_users_csv(include_playback, active_only)
         return Response(
             data,
             mimetype='text/csv',

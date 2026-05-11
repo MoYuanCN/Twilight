@@ -48,7 +48,7 @@ def register(bot):
         except Exception:
             status_text = "📊 状态: ❌ 离线"
 
-        text = f"🎬 **Emby 服务**\n\n{status_text}"
+        text = f"🎬 **Emby 服务中心**\n\n{status_text}\n\n🧭 可使用下方按钮查看线路、统计与密码说明"
         await safe_edit_message(query.message, text, reply_markup=_emby_menu_kb())
 
     # ======================== 线路信息 ========================
@@ -235,6 +235,7 @@ def _emby_menu_kb() -> InlineKeyboardMarkup:
             InlineKeyboardButton("🌐 线路信息", callback_data="emby_lines"),
             InlineKeyboardButton("📊 播放统计", callback_data="emby_playinfo"),
         ],
+        [InlineKeyboardButton("🔒 密码说明", callback_data="emby_resetpwd")],
         [InlineKeyboardButton("♻️ 主菜单", callback_data="back_start")],
     ])
 

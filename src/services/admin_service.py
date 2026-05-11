@@ -12,7 +12,6 @@ from datetime import datetime
 from sqlalchemy import select, func
 
 from src.db.user import UserOperate, UserModel, Role
-from src.db.score import ScoreOperate
 from src.db.playback import PlaybackOperate, DailyStatsOperate, PlaybackSessionFactory, PlaybackModel
 from src.services.emby import get_emby_client
 from src.services.user_service import UserService
@@ -173,46 +172,12 @@ class BatchOperationService:
             'errors': errors,
         }
     
-    @classmethod
-    async def batch_adjust_score(cls, uids: List[int], amount: int, reason: str = "") -> Dict[str, Any]:
-        """批量调整积分"""
-        from src.services.score_service import ScoreService
-        
-        success = 0
-        failed = 0
-        errors = []
-        
-        for uid in uids:
-            try:
-                ok, msg = await ScoreService.admin_adjust_score(uid, amount, reason)
-                if ok:
-                    success += 1
-                else:
-                    failed += 1
-                    errors.append(f"UID {uid}: {msg}")
-            except Exception as e:
-                failed += 1
-                errors.append(f"UID {uid}: {str(e)}")
-        
-        action = "增加" if amount > 0 else "扣除"
-        logger.info(f"批量{action}积分: 成功 {success}, 失败 {failed}, 数量: {abs(amount)}")
-        
-        return {
-            'total': len(uids),
-            'success': success,
-            'failed': failed,
-            'amount': amount,
-            'errors': errors,
-        }
-
-
 class DataExportService:
     """数据导出服务"""
     
     @classmethod
     async def export_users_csv(
         cls,
-        include_score: bool = True,
         include_playback: bool = False,
         active_only: bool = False
     ) -> str:
@@ -230,9 +195,6 @@ class DataExportService:
             'UID', '用户名', 'Telegram ID', '邮箱', '角色', '状态',
             '注册时间', '到期时间', 'Emby ID'
         ]
-        
-        if include_score:
-            fields.extend(['积分', '连签天数'])
         
         if include_playback:
             fields.extend(['总播放时长', '播放次数'])
@@ -259,11 +221,6 @@ class DataExportService:
                 'Emby ID': user.EMBYID or '',
             }
             
-            if include_score:
-                score = await ScoreOperate.get_score_by_uid(user.UID)
-                row['积分'] = score.SCORE if score else 0
-                row['连签天数'] = score.CHECKIN_COUNT if score else 0
-            
             if include_playback:
                 duration = await PlaybackOperate.get_user_total_duration(user.UID)
                 count = await PlaybackOperate.get_user_play_count(user.UID)
@@ -275,7 +232,7 @@ class DataExportService:
         return output.getvalue()
     
     @classmethod
-    async def export_users_json(cls, include_score: bool = True) -> str:
+    async def export_users_json(cls) -> str:
         """导出用户数据为 JSON"""
         users, _ = await UserOperate.get_all_users(limit=10000)
         
@@ -292,12 +249,7 @@ class DataExportService:
                 'expired_at': user.EXPIRED_AT,
                 'emby_id': user.EMBYID,
             }
-            
-            if include_score:
-                score = await ScoreOperate.get_score_by_uid(user.UID)
-                user_data['score'] = score.SCORE if score else 0
-                user_data['checkin_count'] = score.CHECKIN_COUNT if score else 0
-            
+
             data.append(user_data)
         
         return json.dumps(data, ensure_ascii=False, indent=2)
@@ -437,7 +389,7 @@ class ReminderService:
         
         :return: 发送结果
         """
-        from src.config import Config, ScoreAndRegisterConfig
+        from src.config import Config
         
         if not Config.TELEGRAM_MODE:
             return {'sent': 0, 'message': 'Telegram 模式未启用'}

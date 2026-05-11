@@ -2,292 +2,67 @@
 
 import { useCallback, useState } from "react";
 import { motion } from "framer-motion";
-import {
-  Coins,
-  Calendar,
-  Clock,
-  Flame,
-  Gift,
-  CheckCircle2,
-  XCircle,
-  Key,
-  Loader2,
-  Edit,
-  AlertTriangle,
-  Sparkles,
-} from "lucide-react";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
+import { Calendar, Clock, Gift, Key, Loader2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { Progress } from "@/components/ui/progress";
-import { Skeleton } from "@/components/ui/skeleton";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { useAsyncResource } from "@/hooks/use-async-resource";
-import { useRegionRefresh } from "@/hooks/use-region-refresh";
 import { PageError } from "@/components/layout/page-state";
 import { useAuthStore } from "@/store/auth";
-import { api, type ScoreInfo } from "@/lib/api";
-import { formatNumber, cn } from "@/lib/utils";
-import { RegionRefreshKeys } from "@/lib/region-refresh";
+import { api } from "@/lib/api";
 
 const container = {
   hidden: { opacity: 0 },
   show: {
     opacity: 1,
     transition: {
-      staggerChildren: 0.1,
+      staggerChildren: 0.08,
     },
   },
 };
 
 const item = {
-  hidden: { opacity: 0, y: 20 },
+  hidden: { opacity: 0, y: 16 },
   show: { opacity: 1, y: 0 },
 };
 
 export default function DashboardPage() {
   const { user, fetchUser } = useAuthStore();
   const { toast } = useToast();
-  const [scoreInfo, setScoreInfo] = useState<ScoreInfo | null>(null);
-  const [isCheckinLoading, setIsCheckinLoading] = useState(false);
   const [regCode, setRegCode] = useState("");
-  const [isRenewing, setIsRenewing] = useState(false);
   const [regCodeInfo, setRegCodeInfo] = useState<{ type: number; type_name: string; days: number } | null>(null);
   const [showConfirm, setShowConfirm] = useState(false);
-  
-  // Admin edit score
-  const [showEditScore, setShowEditScore] = useState(false);
-  const [editScoreValue, setEditScoreValue] = useState(0);
-  const [isEditingScore, setIsEditingScore] = useState(false);
+  const [isUsingCode, setIsUsingCode] = useState(false);
 
-  const loadDashboardData = useCallback(async () => {
-    const scoreRes = await api.getScoreInfo();
-
-    if (scoreRes.success && scoreRes.data) {
-      setScoreInfo(scoreRes.data);
-    }
-
-    return true;
-  }, []);
+  const loadDashboardData = useCallback(async () => true, []);
 
   const {
     isLoading,
     error,
-    execute: loadData,
   } = useAsyncResource(loadDashboardData, { immediate: true });
 
-  useRegionRefresh(RegionRefreshKeys.DashboardData, useCallback(() => {
-    void loadData();
-  }, [loadData]));
+  const isAdmin = user?.role === 0;
+  const isPending = !user?.emby_id && !user?.active;
 
-  const handleCheckRegcode = async () => {
-    if (!regCode.trim()) {
-      toast({
-        title: "请输入授权码",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    try {
-      const res = await api.checkRegcode(regCode.trim());
-      if (res.success && res.data) {
-        setRegCodeInfo(res.data);
-        // 所有类型（注册码/续期码/白名单码）统一显示确认对话框
-        setShowConfirm(true);
-      } else {
-        toast({
-          title: "授权码无效",
-          description: res.message || "请检查授权码是否正确",
-          variant: "destructive",
-        });
-        setRegCodeInfo(null);
-      }
-    } catch (error: any) {
-      toast({
-        title: "检查失败",
-        description: error.message || "请检查网络连接",
-        variant: "destructive",
-      });
-      setRegCodeInfo(null);
-    }
-  };
-
-  const handleConfirmUseRegcode = async () => {
-    if (!regCode.trim() || !regCodeInfo) return;
-
-    setIsRenewing(true);
-    setShowConfirm(false);
-    try {
-      const res = await api.useCode(regCode.trim());
-      if (res.success) {
-        const messages: string[] = [`账号已成功${regCodeInfo.type_name}`];
-        if (res.data?.emby_password) {
-          messages.push(`Emby 密码: ${res.data.emby_password}`);
-          messages.push("请牢记此密码");
-        }
-        toast({
-          title: `${regCodeInfo.type_name}成功`,
-          description: messages.join("\n"),
-          variant: "success",
-        });
-        setRegCode("");
-        setRegCodeInfo(null);
-        await fetchUser();
-        await loadData();
-      } else {
-        toast({
-          title: `${regCodeInfo.type_name}失败`,
-          description: res.message,
-          variant: "destructive",
-        });
-      }
-    } catch (error: any) {
-      toast({
-        title: `${regCodeInfo.type_name}失败`,
-        description: error.message || "请检查网络连接",
-        variant: "destructive",
-      });
-    } finally {
-      setIsRenewing(false);
-    }
-  };
-
-  const handleEditScore = async () => {
-    setIsEditingScore(true);
-    try {
-      const res = await api.updateMyAdminInfo({ score: editScoreValue });
-      if (res.success) {
-        toast({
-          title: "更新成功",
-          description: "积分已更新",
-          variant: "success",
-        });
-        setShowEditScore(false);
-        await fetchUser();
-        await loadData();
-      } else {
-        toast({
-          title: "更新失败",
-          description: res.message,
-          variant: "destructive",
-        });
-      }
-    } catch (error: any) {
-      toast({
-        title: "更新失败",
-        description: error.message,
-        variant: "destructive",
-      });
-    } finally {
-      setIsEditingScore(false);
-    }
-  };
-
-  const handleCheckin = async () => {
-    // 前端也检查是否已签到
-    if (scoreInfo?.today_checkin) {
-      toast({
-        title: "今日已签到",
-        description: "明天再来吧~",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    setIsCheckinLoading(true);
-    try {
-      const res = await api.checkin();
-      if (res.success && res.data) {
-        toast({
-          title: "签到成功！",
-          description: `获得 ${res.data.score} ${scoreInfo?.score_name || '积分'}，连续签到 ${res.data.streak} 天`,
-          variant: "success",
-        });
-        // 更新本地状态
-        setScoreInfo((prev) => prev ? {
-          ...prev,
-          balance: res.data!.balance,
-          today_checkin: true,
-          checkin_streak: res.data!.streak,
-        } : null);
-        // 刷新用户数据
-        await fetchUser();
-      } else {
-        toast({
-          title: "签到失败",
-          description: res.message,
-          variant: "destructive",
-        });
-      }
-    } catch (error: any) {
-      toast({
-        title: "签到失败",
-        description: error.message,
-        variant: "destructive",
-      });
-    } finally {
-      setIsCheckinLoading(false);
-    }
-  };
-
-  // 计算到期状态
-  const isPending = !user?.emby_id && !user?.active;  // 待激活用户
-  
-  // 处理到期时间（可能是时间戳或字符串）
   let expiredTimestamp: number | null = null;
   if (user?.expired_at) {
-    if (typeof user.expired_at === 'number') {
-      // 如果是 -1，表示永久
-      if (user.expired_at === -1) {
-        expiredTimestamp = null;
-      } else {
-        // 如果是秒级时间戳（小于 10 位），转换为毫秒
+    if (typeof user.expired_at === "number") {
+      if (user.expired_at !== -1) {
         expiredTimestamp = user.expired_at < 10000000000 ? user.expired_at * 1000 : user.expired_at;
-        // 检查是否为异常值（如 1978 年等明显错误的日期）
-        const date = new Date(expiredTimestamp);
-        // 如果日期早于 2000 年，认为是永久
-        if (date.getFullYear() < 2000) {
-          expiredTimestamp = null;
-        }
       }
-    } else if (typeof user.expired_at === 'string') {
-      // 如果是字符串，尝试解析
-      if (user.expired_at === '-1' || user.expired_at === '-1') {
-        expiredTimestamp = null; // 永久
-      } else {
-        const parsed = new Date(user.expired_at).getTime();
-        // 检查是否为异常值
-        const date = new Date(parsed);
-        if (date.getFullYear() < 2000) {
-          expiredTimestamp = null;
-        } else {
-          expiredTimestamp = parsed;
-        }
-      }
+    } else if (typeof user.expired_at === "string" && user.expired_at !== "-1") {
+      const parsed = new Date(user.expired_at).getTime();
+      expiredTimestamp = Number.isNaN(parsed) ? null : parsed;
     }
   }
-  
-  const isAdmin = user?.role === 0;
-  const isUnregistered = !user?.emby_id && !user?.active && !isAdmin;
-  const isExpired = !isAdmin && expiredTimestamp !== null && expiredTimestamp !== -1 && expiredTimestamp < Date.now();
-  const isPermanent = isAdmin || (!expiredTimestamp && !isUnregistered) || expiredTimestamp === -1;
-  
-  const daysLeft = (!isPending && !isPermanent && !isUnregistered && expiredTimestamp)
-    ? Math.max(0, Math.ceil((expiredTimestamp - Date.now()) / (1000 * 60 * 60 * 24)))
-    : 0;
 
-  // 获取问候语
+  const isPermanent = isAdmin || expiredTimestamp === null;
+  const safeExpiredTimestamp = expiredTimestamp ?? 0;
+  const isExpired = !isPermanent && safeExpiredTimestamp < Date.now();
+  const daysLeft = !isPermanent ? Math.max(0, Math.ceil((safeExpiredTimestamp - Date.now()) / (1000 * 60 * 60 * 24))) : 0;
+
   const getGreeting = () => {
     const hour = new Date().getHours();
     if (hour < 6) return "凌晨好";
@@ -299,265 +74,135 @@ export default function DashboardPage() {
     return "夜深了";
   };
 
+  const handleCheckRegcode = async () => {
+    if (!regCode.trim()) {
+      toast({ title: "请输入授权码", variant: "destructive" });
+      return;
+    }
+
+    try {
+      const res = await api.checkRegcode(regCode.trim());
+      if (res.success && res.data) {
+        setRegCodeInfo(res.data);
+        setShowConfirm(true);
+      } else {
+        toast({ title: "授权码无效", description: res.message, variant: "destructive" });
+      }
+    } catch (err: any) {
+      toast({ title: "检查失败", description: err.message || "网络异常", variant: "destructive" });
+    }
+  };
+
+  const handleUseRegcode = async () => {
+    if (!regCodeInfo || !regCode.trim()) return;
+
+    setIsUsingCode(true);
+    try {
+      const res = await api.useCode(regCode.trim());
+      if (res.success) {
+        toast({ title: "授权码使用成功", description: regCodeInfo.type_name, variant: "success" });
+        setRegCode("");
+        setRegCodeInfo(null);
+        setShowConfirm(false);
+        await fetchUser();
+      } else {
+        toast({ title: "使用失败", description: res.message, variant: "destructive" });
+      }
+    } catch (err: any) {
+      toast({ title: "使用失败", description: err.message || "网络异常", variant: "destructive" });
+    } finally {
+      setIsUsingCode(false);
+    }
+  };
+
   if (error) {
-    return <PageError message={error} onRetry={() => void loadData()} />;
+    return <PageError message={error} />;
   }
 
   return (
-    <motion.div
-      variants={container}
-      initial="hidden"
-      animate="show"
-      className="space-y-8 pb-10"
-    >
+    <motion.div variants={container} initial="hidden" animate="show" className="space-y-6 pb-10">
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
         <div>
-          <h1 className="text-4xl font-black tracking-tighter text-foreground">
-            {getGreeting()}，{user?.username}
-          </h1>
+          <h1 className="text-4xl font-black tracking-tighter">{getGreeting()}，{user?.username}</h1>
           <p className="text-muted-foreground font-medium mt-1">
-            {isPending ? "完成激活后即可开始使用全部功能" : "欢迎回来，当前账号状态正常"}
+            {isPending ? "当前账号可登录，若需媒体服务请联系管理员开通 Emby 账号" : "欢迎回来，当前账号状态正常"}
           </p>
         </div>
-        <div className="flex items-center gap-3">
-           <Badge className="bg-primary/10 text-primary border-primary/20 px-4 py-1.5 rounded-full font-black text-xs uppercase tracking-widest">
-             {user?.role_name}
-           </Badge>
+        <Badge className="bg-primary/10 text-primary border-primary/20 px-4 py-1.5 rounded-full font-black text-xs uppercase tracking-widest w-fit">
+          {user?.role_name}
+        </Badge>
+      </div>
+
+      <div className="grid gap-6 md:grid-cols-3">
+        <motion.div variants={item} className="premium-card p-6">
+          <div className="p-3 w-fit bg-amber-500/10 text-amber-500 rounded-2xl">
+            <Calendar className="h-5 w-5" />
+          </div>
+          <p className="mt-6 text-[10px] font-black uppercase tracking-widest text-muted-foreground">到期倒计时</p>
+          <h3 className="text-3xl font-black mt-1">
+            {isPermanent ? "∞ 永久" : `${daysLeft} 天`}
+          </h3>
+        </motion.div>
+
+        <motion.div variants={item} className="premium-card p-6">
+          <div className="p-3 w-fit bg-purple-500/10 text-purple-500 rounded-2xl">
+            <Clock className="h-5 w-5" />
+          </div>
+          <p className="mt-6 text-[10px] font-black uppercase tracking-widest text-muted-foreground">账号状态</p>
+          <h3 className="text-3xl font-black mt-1">
+            {isPending ? "待开通 Emby" : isExpired ? "已过期" : "正常"}
+          </h3>
+        </motion.div>
+
+        <motion.div variants={item} className="premium-card p-6">
+          <div className="p-3 w-fit bg-emerald-500/10 text-emerald-500 rounded-2xl">
+            <Gift className="h-5 w-5" />
+          </div>
+          <p className="mt-6 text-[10px] font-black uppercase tracking-widest text-muted-foreground">Emby 绑定</p>
+          <h3 className="text-3xl font-black mt-1">{user?.emby_id ? "已绑定" : "未绑定"}</h3>
+        </motion.div>
+      </div>
+
+      <motion.div variants={item} className="premium-card p-6">
+        <div className="flex items-center gap-3 mb-5">
+          <div className="p-2 bg-primary/10 rounded-xl text-primary">
+            <Key className="h-5 w-5" />
+          </div>
+          <div>
+            <h3 className="text-base font-black tracking-tight">授权码使用</h3>
+            <p className="text-[11px] text-muted-foreground font-bold uppercase tracking-tighter">Code Use</p>
+          </div>
         </div>
-      </div>
 
-      {/* Stats Overview */}
-      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
-        <motion.div variants={item}>
-          <div className="premium-card p-6 h-full flex flex-col justify-between group">
-            <div className="flex items-center justify-between">
-              <div className="p-3 bg-blue-500/10 text-blue-500 rounded-2xl group-hover:bg-blue-500 group-hover:text-white transition-all duration-500 shadow-sm">
-                <Coins className="h-5 w-5" />
-              </div>
-              {user?.role === 0 && (
-                <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg" onClick={() => {
-                  setEditScoreValue(scoreInfo?.balance || 0);
-                  setShowEditScore(true);
-                }}>
-                  <Edit className="h-3.5 w-3.5" />
-                </Button>
-              )}
-            </div>
-            <div className="mt-6">
-              <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">{scoreInfo?.score_name || "积分"}余额</p>
-              <h3 className="text-3xl font-black mt-1">
-                {isLoading ? <Skeleton className="h-8 w-24" /> : formatNumber(scoreInfo?.balance || 0)}
-              </h3>
-            </div>
-          </div>
-        </motion.div>
+        <div className="flex flex-col gap-3 md:flex-row">
+          <Input
+            placeholder="请输入授权码"
+            value={regCode}
+            onChange={(e) => setRegCode(e.target.value)}
+            className="h-12 rounded-xl border-white/60 bg-white/40 shadow-inner"
+          />
+          <Button onClick={handleCheckRegcode} disabled={isLoading || isUsingCode} className="h-12 rounded-xl font-black">
+            {isUsingCode ? <Loader2 className="h-4 w-4 animate-spin" /> : "验证并使用"}
+          </Button>
+        </div>
+      </motion.div>
 
-        <motion.div variants={item}>
-          <div className="premium-card p-6 h-full flex flex-col justify-between group">
-            <div className="p-3 w-fit bg-amber-500/10 text-amber-500 rounded-2xl group-hover:bg-amber-500 group-hover:text-white transition-all duration-500 shadow-sm">
-              <Calendar className="h-5 w-5" />
-            </div>
-            <div className="mt-6">
-              <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">到期倒计时</p>
-              <h3 className="text-3xl font-black mt-1">
-                {isUnregistered ? "尚未注册" : isPermanent ? "∞ 永恒" : `${daysLeft} 天`}
-              </h3>
-            </div>
-          </div>
-        </motion.div>
-
-        <motion.div variants={item}>
-          <div className="premium-card p-6 h-full flex flex-col justify-between group">
-            <div className="p-3 w-fit bg-emerald-500/10 text-emerald-500 rounded-2xl group-hover:bg-emerald-500 group-hover:text-white transition-all duration-500 shadow-sm">
-              <Flame className="h-5 w-5" />
-            </div>
-            <div className="mt-6">
-              <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">连续签到</p>
-              <h3 className="text-3xl font-black mt-1">
-                {isLoading ? <Skeleton className="h-8 w-24" /> : `${scoreInfo?.checkin_streak || 0} DAY`}
-              </h3>
-            </div>
-          </div>
-        </motion.div>
-
-        <motion.div variants={item}>
-          <div className="premium-card p-6 h-full flex flex-col justify-between group">
-            <div className="p-3 w-fit bg-purple-500/10 text-purple-500 rounded-2xl group-hover:bg-purple-500 group-hover:text-white transition-all duration-500 shadow-sm">
-              <Clock className="h-5 w-5" />
-            </div>
-            <div className="mt-6">
-              <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground">账号状态</p>
-              <h3 className="text-3xl font-black mt-1">
-                {isPending ? "待激活" : isExpired ? "已过期" : "正常"}
-              </h3>
-            </div>
-          </div>
-        </motion.div>
-      </div>
-
-      <div className="grid gap-6">
-        {/* Main Interaction Area */}
-        <motion.div variants={item} className="space-y-6">
-          {/* Checkin / Welcome Card */}
-          <div className="premium-card p-1 shadow-2xl">
-            <div className="glass-liquid p-8 rounded-[1.75rem] flex flex-col md:flex-row items-center gap-8 border-0 overflow-hidden relative">
-               <div className="absolute -top-12 -right-12 w-48 h-48 bg-primary/10 blur-[80px] rounded-full" />
-               <div className="relative group shrink-0">
-                  <div className="absolute -inset-4 bg-primary/20 rounded-full blur-2xl group-hover:bg-primary/30 transition-all duration-500" />
-                  <div className="relative bg-white/60 p-6 rounded-3xl border border-white shadow-xl">
-                    <Gift className="h-12 w-12 text-primary animate-bounce-slow" />
-                  </div>
-               </div>
-               <div className="flex-1 text-center md:text-left z-10">
-                  <h2 className="text-2xl font-black tracking-tight">每日签到</h2>
-                  <p className="text-muted-foreground font-medium mt-1">
-                    {scoreInfo?.today_checkin 
-                      ? "任务已达成！明天再来领奖励吧" 
-                      : `快来领取今日奖励，已连签 ${scoreInfo?.checkin_streak || 0} 天`}
-                  </p>
-                  <div className="mt-8 flex flex-col sm:flex-row items-center gap-4">
-                    {scoreInfo?.today_checkin ? (
-                      <div className="inline-flex items-center gap-2 px-6 h-12 bg-emerald-500/10 text-emerald-600 rounded-2xl border border-emerald-200 font-black text-xs uppercase tracking-widest">
-                        <CheckCircle2 className="h-4 w-4" />
-                        MISSION COMPLETED
-                      </div>
-                    ) : (
-                      <Button 
-                        size="lg" 
-                        onClick={handleCheckin} 
-                        disabled={isCheckinLoading}
-                        className="rounded-2xl px-10 h-14 font-black text-base shadow-2xl shadow-primary/30 hover:scale-105 active:scale-95 transition-all"
-                      >
-                        {isCheckinLoading ? <Loader2 className="h-5 w-5 animate-spin mr-2" /> : <Sparkles className="h-5 w-5 mr-2" />}
-                        立即签到
-                      </Button>
-                    )}
-                    
-                    <div className="flex-1 max-w-[200px]">
-                       <div className="flex justify-between text-[10px] font-black uppercase mb-1.5 opacity-60">
-                         <span>连签进度</span>
-                         <span>{scoreInfo?.checkin_streak || 0}/7</span>
-                       </div>
-                       <Progress value={((scoreInfo?.checkin_streak || 0) % 7) / 7 * 100} className="h-1.5 bg-white/40" />
-                    </div>
-                  </div>
-               </div>
-            </div>
-          </div>
-
-          <div className="grid gap-6 md:grid-cols-2">
-            {/* Activation / Renewal */}
-            <div className="premium-card p-6 flex flex-col border-white/40">
-              <div className="flex items-center gap-3 mb-6">
-                <div className="p-2 bg-primary/10 rounded-xl text-primary">
-                  <Key className="h-5 w-5" />
-                </div>
-                <div>
-                  <h3 className="text-base font-black tracking-tight">兑换码使用</h3>
-                  <p className="text-[11px] text-muted-foreground font-bold uppercase tracking-tighter">Code Use</p>
-                </div>
-              </div>
-              <div className="flex flex-col gap-3">
-                <Input
-                  placeholder="请输入兑换码以获得权益"
-                  value={regCode}
-                  onChange={(e) => setRegCode(e.target.value)}
-                  className="h-12 rounded-xl border-white/60 bg-white/40 shadow-inner focus:bg-white transition-all font-medium"
-                />
-                <Button 
-                  onClick={handleCheckRegcode} 
-                  disabled={isRenewing}
-                  className="h-12 rounded-xl font-black bg-secondary text-foreground hover:bg-secondary/70 shadow-lg border-white transition-all"
-                >
-                  {isRenewing ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : "验证并使用"}
-                </Button>
-              </div>
-              <p className="mt-4 text-[11px] text-center text-muted-foreground font-bold">
-                请输入有效授权码后继续
-              </p>
-            </div>
-
-
-          </div>
-        </motion.div>
-      </div>
-
-      {/* Dialogs */}
       <Dialog open={showConfirm} onOpenChange={setShowConfirm}>
-        <DialogContent className="max-w-md glass-acrylic border-0 rounded-[2.5rem] p-0 overflow-hidden shadow-2xl">
-          <div className="p-8">
-            <div className="flex items-center gap-4 mb-6">
-               <div className="h-12 w-12 rounded-2xl bg-primary/10 flex items-center justify-center text-primary">
-                  <CheckCircle2 className="h-6 w-6" />
-               </div>
-               <div>
-                  <DialogTitle className="text-xl font-black">确认使用授权码</DialogTitle>
-                  <p className="text-sm text-muted-foreground font-medium">请确认以下授权信息</p>
-               </div>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>确认使用授权码</DialogTitle>
+          </DialogHeader>
+          {regCodeInfo && (
+            <div className="space-y-2 text-sm text-muted-foreground">
+              <p>类型: {regCodeInfo.type_name}</p>
+              <p>{regCodeInfo.type === 3 ? "有效期: 永久" : `增加时长: ${regCodeInfo.days} 天`}</p>
             </div>
-            
-            {regCodeInfo && (
-              <div className="p-4 rounded-2xl bg-secondary/50 border border-white mb-8 space-y-3">
-                <div className="flex justify-between items-center">
-                  <span className="text-xs font-bold text-muted-foreground">授权类型</span>
-                  <Badge className="bg-primary/20 text-primary border-0 rounded-lg">{regCodeInfo.type_name}</Badge>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-xs font-bold text-muted-foreground">{regCodeInfo.type === 3 ? '有效期' : '增加时长'}</span>
-                  <span className="text-sm font-black">{regCodeInfo.type === 3 ? '永久' : `${regCodeInfo.days} 天`}</span>
-                </div>
-              </div>
-            )}
-
-            <div className="flex gap-3">
-              <Button variant="outline" className="flex-1 h-12 rounded-2xl font-black border-white bg-white/40" onClick={() => setShowConfirm(false)}>
-                取消
-              </Button>
-              <Button className="flex-[2] h-12 rounded-2xl font-black shadow-xl shadow-primary/20" onClick={handleConfirmUseRegcode}>
-                立即激活
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={showEditScore} onOpenChange={setShowEditScore}>
-        <DialogContent className="max-w-md glass-acrylic border-0 rounded-[2.5rem] p-0 overflow-hidden shadow-2xl">
-          <div className="p-8">
-            <div className="flex items-center gap-4 mb-6">
-               <div className="h-12 w-12 rounded-2xl bg-amber-500/10 flex items-center justify-center text-amber-500">
-                  <AlertTriangle className="h-6 w-6" />
-               </div>
-               <div>
-                  <DialogTitle className="text-xl font-black">修改管理员积分</DialogTitle>
-                  <p className="text-sm text-muted-foreground font-medium">此操作仅限管理员调试</p>
-               </div>
-            </div>
-            
-            <div className="space-y-4 mb-8">
-              <div className="space-y-2">
-                <Label className="text-xs font-black uppercase tracking-widest ml-1">New Balance</Label>
-                <Input
-                  type="number"
-                  value={editScoreValue}
-                  onChange={(e) => setEditScoreValue(Number(e.target.value))}
-                  className="h-12 rounded-2xl border-white bg-white/40 shadow-inner"
-                />
-              </div>
-            </div>
-
-            <div className="flex gap-3">
-              <Button variant="outline" className="flex-1 h-12 rounded-2xl font-black border-white bg-white/40" onClick={() => setShowEditScore(false)}>
-                取消
-              </Button>
-              <Button 
-                className="flex-[2] h-12 rounded-2xl font-black shadow-xl shadow-amber-500/20 bg-amber-500 text-white hover:bg-amber-600"
-                onClick={handleEditScore}
-                disabled={isEditingScore}
-              >
-                {isEditingScore ? <Loader2 className="h-5 w-5 animate-spin" /> : "更新积分"}
-              </Button>
-            </div>
+          )}
+          <div className="flex gap-3 justify-end">
+            <Button variant="outline" onClick={() => setShowConfirm(false)}>取消</Button>
+            <Button onClick={handleUseRegcode} disabled={isUsingCode}>
+              {isUsingCode ? <Loader2 className="h-4 w-4 animate-spin" /> : "确认"}
+            </Button>
           </div>
         </DialogContent>
       </Dialog>

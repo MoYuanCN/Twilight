@@ -31,6 +31,7 @@ pip install -r requirements.txt -r requirements-dev.txt
 #### VS Code
 
 推荐扩展：
+
 - **Python** - ms-python.python
 - **Pylance** - ms-python.vscode-pylance
 - **Black Formatter** - ms-python.black-formatter
@@ -59,16 +60,16 @@ pip install -r requirements.txt -r requirements-dev.txt
 
 ## 项目结构
 
-```
+```text
 Twilight/
 ├── src/
 │   ├── api/              # API 模块
-│   │   ├── v1/          # API v1 接口（auth, users, apikey, score, media, emby, admin, ...）
+│   │   ├── v1/          # API v1 接口（auth, users, apikey, media, emby, admin, ...）
 │   │   └── swagger_template.py
 │   ├── bot/              # Telegram Bot
 │   ├── core/             # 核心工具
 │   ├── db/               # 数据库模块（ORM 模型 + 数据访问）
-│   ├── services/         # 业务逻辑服务（emby, bangumi, score, scheduler, ...）
+│   ├── services/         # 业务逻辑服务（emby, bangumi, scheduler, ...）
 │   └── schemas/          # 数据模型
 ├── tests/                # 可选：单元测试目录（按需补充）
 ├── docs/                 # 文档
@@ -85,7 +86,7 @@ Twilight/
 ### 关键目录说明
 
 - **src/api/v1/** - REST API 接口实现，按功能分为多个蓝图
-- **src/services/** - 业务逻辑层，包含 Emby、Bangumi、积分等服务
+- **src/services/** - 业务逻辑层，包含 Emby、Bangumi、调度等服务
 - **src/db/** - 数据库操作层，包含 ORM 模型和数据访问对象
 - **tests/** - 可选测试目录（按需创建与维护）
 
@@ -319,11 +320,11 @@ async def protected_endpoint():
 
 使用简洁清晰的 Commit Message：
 
-```
+```text
 feat: 添加新的认证方式
 fix: 修复 token 过期检查的 bug
 docs: 更新安装文档
-refactor: 重构积分系统
+refactor: 重构用户状态同步流程
 test: 添加用户认证测试
 perf: 优化数据库查询性能
 ```
@@ -333,6 +334,7 @@ perf: 优化数据库查询性能
 ### 修改了 Config 但没有生效?
 
 确保：
+
 1. 重启应用
 2. 正确设置环境变量前缀 `TWILIGHT_`
 3. 检查 `config.toml` 中相应配置的优先级

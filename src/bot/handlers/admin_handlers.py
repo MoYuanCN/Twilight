@@ -5,6 +5,7 @@
 支持用户管理、注册码、统计、Emby、广播等
 """
 import logging
+import time
 
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes, CommandHandler, CallbackQueryHandler, MessageHandler, filters
@@ -16,7 +17,6 @@ from src.bot.handlers.common import (
 )
 from src.db.user import UserOperate, Role
 from src.db.regcode import RegCodeOperate
-from src.db.score import ScoreOperate
 from src.services.user_service import UserService, RegisterResult
 from src.services.emby_service import EmbyService
 from src.services.emby import get_emby_client
@@ -26,6 +26,32 @@ logger = logging.getLogger(__name__)
 
 # 会话状态存储（admin_id -> state dict）
 _admin_states = {}
+_ADMIN_STATE_TTL = 15 * 60
+
+
+def _set_admin_state(uid: int, state: dict):
+    payload = dict(state)
+    payload['_ts'] = int(time.time())
+    _admin_states[uid] = payload
+
+
+def _get_admin_state(uid: int):
+    state = _admin_states.get(uid)
+    if not state:
+        return None
+
+    ts = int(state.get('_ts', 0))
+    if ts <= 0 or int(time.time()) - ts > _ADMIN_STATE_TTL:
+        _admin_states.pop(uid, None)
+        return None
+
+    payload = dict(state)
+    payload.pop('_ts', None)
+    return payload
+
+
+def _clear_admin_state(uid: int) -> bool:
+    return _admin_states.pop(uid, None) is not None
 
 
 def register(bot):
@@ -39,10 +65,24 @@ def register(bot):
     async def cmd_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         """管理面板命令"""
         await update.message.reply_text(
-            "🔧 **管理面板**\n\n请选择功能：",
+            "🔧 **管理面板**\n\n请选择功能：\n💡 输入型操作可发送 /cancel 取消",
             reply_markup=_admin_menu_kb(),
             parse_mode="Markdown",
         )
+
+    @require_private
+    @require_admin
+    async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """取消当前管理员输入流程"""
+        uid = update.effective_user.id
+        had_state = _clear_admin_state(uid)
+        if had_state:
+            await update.message.reply_text(
+                "✅ 已取消当前操作\n\n可发送 /admin 返回管理面板",
+                parse_mode="Markdown",
+            )
+        else:
+            await update.message.reply_text("ℹ️ 当前没有进行中的输入流程")
 
     async def cb_panel_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         """管理面板回调入口"""
@@ -123,9 +163,9 @@ def register(bot):
         query = update.callback_query
         await answer_callback_safe(query)
         uid = update.effective_user.id
-        _admin_states[uid] = {"action": "query_user"}
+        _set_admin_state(uid, {"action": "query_user"})
         kb = InlineKeyboardMarkup([[InlineKeyboardButton("❌ 取消", callback_data="admin_users")]])
-        await safe_edit_message(query.message, "🔍 **查询用户**\n\n请发送用户名：", reply_markup=kb)
+        await safe_edit_message(query.message, "🔍 **查询用户**\n\n请发送用户名：\n💡 发送 /cancel 可取消", reply_markup=kb)
 
     @require_admin
     async def cb_adm_adduser(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -133,11 +173,11 @@ def register(bot):
         query = update.callback_query
         await answer_callback_safe(query)
         uid = update.effective_user.id
-        _admin_states[uid] = {"action": "add_user"}
+        _set_admin_state(uid, {"action": "add_user"})
         kb = InlineKeyboardMarkup([[InlineKeyboardButton("❌ 取消", callback_data="admin_users")]])
         await safe_edit_message(
             query.message,
-            "➕ **添加用户**\n\n请发送: `用户名 天数`\n示例: `test 30`",
+            "➕ **添加用户**\n\n请发送: `用户名 天数`\n示例: `test 30`\n💡 发送 /cancel 可取消",
             reply_markup=kb,
         )
 
@@ -147,11 +187,11 @@ def register(bot):
         query = update.callback_query
         await answer_callback_safe(query)
         uid = update.effective_user.id
-        _admin_states[uid] = {"action": "ban_user"}
+        _set_admin_state(uid, {"action": "ban_user"})
         kb = InlineKeyboardMarkup([[InlineKeyboardButton("❌ 取消", callback_data="admin_users")]])
         await safe_edit_message(
             query.message,
-            "🚫 **禁用/解禁用户**\n\n请发送用户名，将自动切换其状态：",
+            "🚫 **禁用/解禁用户**\n\n请发送用户名，将自动切换其状态：\n💡 发送 /cancel 可取消",
             reply_markup=kb,
         )
 
@@ -251,9 +291,9 @@ def register(bot):
         await answer_callback_safe(query)
         username = query.data.split(":")[1] if ":" in query.data else ""
         uid = update.effective_user.id
-        _admin_states[uid] = {"action": "renew_user", "username": username}
+        _set_admin_state(uid, {"action": "renew_user", "username": username})
         kb = InlineKeyboardMarkup([[InlineKeyboardButton("❌ 取消", callback_data=f"adm_userdetail:{username}")]])
-        await safe_edit_message(query.message, f"🔄 **续期 `{username}`**\n\n请发送天数：", reply_markup=kb)
+        await safe_edit_message(query.message, f"🔄 **续期 `{username}`**\n\n请发送天数：\n💡 发送 /cancel 可取消", reply_markup=kb)
 
     # ======================== 注册码管理 ========================
 
@@ -502,9 +542,9 @@ def register(bot):
         query = update.callback_query
         await answer_callback_safe(query)
         uid = update.effective_user.id
-        _admin_states[uid] = {"action": "broadcast"}
+        _set_admin_state(uid, {"action": "broadcast"})
         kb = InlineKeyboardMarkup([[InlineKeyboardButton("❌ 取消", callback_data="panel_admin")]])
-        await safe_edit_message(query.message, "📢 **广播消息**\n\n请发送要广播的内容：", reply_markup=kb)
+        await safe_edit_message(query.message, "📢 **广播消息**\n\n请发送要广播的内容：\n💡 发送 /cancel 可取消", reply_markup=kb)
 
     # ======================== 文本消息路由（admin 状态机）========================
 
@@ -512,30 +552,44 @@ def register(bot):
     async def handle_admin_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         """处理管理员文本输入（根据状态机路由）"""
         uid = update.effective_user.id
-        state = _admin_states.pop(uid, None)
+        state = _get_admin_state(uid)
         if not state:
             return  # 无状态，忽略
 
         action = state.get("action")
-        text = update.message.text.strip()
+        text = (update.message.text or "").strip()
+
+        if text.lower() in {"/cancel", "cancel", "取消", "返回"}:
+            _clear_admin_state(uid)
+            await update.message.reply_text("✅ 已取消当前操作，可发送 /admin 返回管理面板")
+            return
 
         if action == "query_user":
             user = await UserOperate.get_user_by_username(text)
             if not user:
-                await update.message.reply_text(f"❌ 用户 `{text}` 不存在", parse_mode="Markdown")
+                await update.message.reply_text(f"❌ 用户 `{text}` 不存在\n请重新输入，或发送 /cancel 取消", parse_mode="Markdown")
                 return
-            score = await ScoreOperate.get_score_by_uid(user.UID)
-            balance = score.SCORE if score else 0
-            info = f"📋 **用户详情**\n\n{format_user_info(user)}\n💰 积分: **{balance}**"
+            info = f"📋 **用户详情**\n\n{format_user_info(user)}"
             kb = _user_action_kb(user)
             await update.message.reply_text(info, reply_markup=kb, parse_mode="Markdown")
+            _clear_admin_state(uid)
 
         elif action == "add_user":
             parts = text.split()
+            if not parts:
+                await update.message.reply_text("❌ 输入格式错误，请发送: `用户名 天数`\n示例: `test 30`", parse_mode="Markdown")
+                return
             username = parts[0]
-            days = int(parts[1]) if len(parts) > 1 else 30
+            try:
+                days = int(parts[1]) if len(parts) > 1 else 30
+            except ValueError:
+                await update.message.reply_text("❌ 天数必须是数字，请重新输入")
+                return
+            if days <= 0:
+                await update.message.reply_text("❌ 天数必须大于 0，请重新输入")
+                return
             if await UserOperate.get_user_by_username(username):
-                await update.message.reply_text("❌ 用户名已存在")
+                await update.message.reply_text("❌ 用户名已存在，请换一个用户名")
                 return
             resp = await UserService._create_emby_user(
                 telegram_id=None, username=username, email=None, days=days
@@ -548,13 +602,14 @@ def register(bot):
                     f"⏰ 有效期: **{days}** 天",
                     parse_mode="Markdown",
                 )
+                _clear_admin_state(uid)
             else:
                 await update.message.reply_text(f"❌ 创建失败: {resp.message}")
 
         elif action == "ban_user":
             user = await UserOperate.get_user_by_username(text)
             if not user:
-                await update.message.reply_text(f"❌ 用户 `{text}` 不存在", parse_mode="Markdown")
+                await update.message.reply_text(f"❌ 用户 `{text}` 不存在\n请重新输入，或发送 /cancel 取消", parse_mode="Markdown")
                 return
             if user.ACTIVE_STATUS:
                 if user.EMBYID:
@@ -576,21 +631,27 @@ def register(bot):
                 user.ACTIVE_STATUS = True
                 await UserOperate.update_user(user)
                 await update.message.reply_text(f"✅ 已解禁用户: `{text}`", parse_mode="Markdown")
+            _clear_admin_state(uid)
 
         elif action == "renew_user":
             username = state.get("username", "")
             try:
                 days = int(text)
             except ValueError:
-                await update.message.reply_text("❌ 请输入数字天数")
+                await update.message.reply_text("❌ 请输入数字天数，或发送 /cancel 取消")
+                return
+            if days <= 0:
+                await update.message.reply_text("❌ 天数必须大于 0")
                 return
             user = await UserOperate.get_user_by_username(username)
             if not user:
-                await update.message.reply_text("❌ 用户不存在")
+                await update.message.reply_text("❌ 用户不存在，已取消本次续期流程")
+                _clear_admin_state(uid)
                 return
             success, msg = await UserService.renew_user(user, days)
             if success:
                 await update.message.reply_text(f"✅ 已为 `{username}` 续期 **{days}** 天", parse_mode="Markdown")
+                _clear_admin_state(uid)
             else:
                 await update.message.reply_text(f"❌ 续期失败: {msg}")
 
@@ -625,6 +686,7 @@ def register(bot):
                 if (i + 1) % 10 == 0:
                     await safe_edit_message(progress, f"📢 广播中... ({i + 1}/{len(tg_ids)})")
             await safe_edit_message(progress, f"✅ **广播完成**\n📤 成功: {success}  ❌ 失败: {failed}")
+            _clear_admin_state(uid)
 
     # ======================== 传统命令（兼容） ========================
 
@@ -683,7 +745,7 @@ def register(bot):
             await update.message.reply_text("用法: `/broadcast <内容>`", parse_mode="Markdown")
             return
         content = update.message.text.split(None, 1)[1]
-        _admin_states[update.effective_user.id] = None  # clear
+        _admin_states.pop(update.effective_user.id, None)  # clear
         from src.db.user import UsersSessionFactory, UserModel
         from sqlalchemy import select
         async with UsersSessionFactory() as session:
@@ -723,15 +785,14 @@ def register(bot):
         if not user:
             await update.message.reply_text("❌ 用户不存在")
             return
-        score = await ScoreOperate.get_score_by_uid(user.UID)
-        balance = score.SCORE if score else 0
-        text = f"📋 **用户详情**\n\n{format_user_info(user)}\n💰 积分: **{balance}**"
+        text = f"📋 **用户详情**\n\n{format_user_info(user)}"
         await update.message.reply_text(text, reply_markup=_user_action_kb(user), parse_mode="Markdown")
 
     # ======================== 注册处理器 ========================
 
     # 命令
     app.add_handler(CommandHandler("admin", cmd_admin))
+    app.add_handler(CommandHandler("cancel", cmd_cancel))
     app.add_handler(CommandHandler("adduser", cmd_adduser))
     app.add_handler(CommandHandler("regcode", cmd_regcode))
     app.add_handler(CommandHandler("broadcast", cmd_broadcast))
@@ -811,7 +872,5 @@ def _user_action_kb(user) -> InlineKeyboardMarkup:
 
 async def _show_user_detail(message, user):
     """显示用户详情"""
-    score = await ScoreOperate.get_score_by_uid(user.UID)
-    balance = score.SCORE if score else 0
-    text = f"📋 **用户详情**\n\n{format_user_info(user)}\n💰 积分: **{balance}**"
+    text = f"📋 **用户详情**\n\n{format_user_info(user)}"
     await safe_edit_message(message, text, reply_markup=_user_action_kb(user))

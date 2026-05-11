@@ -10,7 +10,6 @@ import { useAuthStore } from "@/store/auth";
 import {
   LayoutDashboard,
   Film,
-  Coins,
   Settings,
   Users,
   FileText,
@@ -40,7 +39,6 @@ export interface SidebarNavItem {
 export const userNavItems: SidebarNavItem[] = [
   { href: "/dashboard", label: "仪表盘", icon: LayoutDashboard },
   { href: "/media", label: "求片中心", icon: Film },
-  { href: "/score", label: "积分中心", icon: Coins },
   { href: "/settings", label: "个人设置", icon: Settings },
 ];
 

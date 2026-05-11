@@ -25,14 +25,6 @@ from src.services.user_service import (
     RegisterResult,
     RegisterResponse,
 )
-from src.services.score_service import (
-    ScoreService,
-    RedPacketService,
-    CheckinResult,
-    CheckinResponse,
-    RedPacketType,
-    RedPacketStatus,
-)
 from src.services.tmdb import (
     TMDBClient,
     TMDBMedia,
@@ -86,9 +78,6 @@ from src.services.admin_service import (
     WatchHistoryService,
     ReminderService,
 )
-from src.services.auto_renew_service import (
-    AutoRenewService,
-)
 from src.services.emby_register_queue import (
     EmbyRegisterQueueService,
 )
@@ -112,13 +101,6 @@ __all__ = [
     'UserService',
     'RegisterResult',
     'RegisterResponse',
-    # 积分服务
-    'ScoreService',
-    'RedPacketService',
-    'CheckinResult',
-    'CheckinResponse',
-    'RedPacketType',
-    'RedPacketStatus',
     # TMDB
     'TMDBClient',
     'TMDBMedia',
@@ -161,8 +143,6 @@ __all__ = [
     'DataExportService',
     'WatchHistoryService',
     'ReminderService',
-    # 自动续期
-    'AutoRenewService',
     # Emby 自由注册队列
     'EmbyRegisterQueueService',
 ]

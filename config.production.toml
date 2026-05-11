@@ -102,30 +102,16 @@ proxy_url = ""
 # ===================================================================
 [SAR]
 # ===================================================================
-# 积分名称，会在前端和通知中显示
-score_name = "暮光币"
 # 是否允许注册
 register_mode = true
 # 是否仅允许使用注册码注册
 register_code_limit = false
-# 是否允许使用积分注册/激活
-score_register_mode = false
-# 积分注册/激活所需积分
-score_register_need = 100
 # 最大注册用户数量，-1 表示不限制
 user_limit = 200
-# 新用户注册或续期时是否通知管理员
-new_user_notice_status = false
-# 通知是否包含个人主页链接
-new_user_notice_link = false
 
 # ---- 无码注册（待激活） ----
 # 是否允许无码注册
 allow_pending_register = true
-# 无码注册赠送初始积分
-pending_register_bonus = 0
-# 是否允许无 Emby 账户用户签到
-allow_no_emby_checkin = true
 # 是否允许无 Emby 账户用户查看部分内容
 allow_no_emby_view = true
 
@@ -147,38 +133,8 @@ admin_usernames = ""
 white_list_uids = ""
 white_list_usernames = ""
 
-# ---- 红包功能 ----
-red_packet_mode = false
-red_packet_min_amount = 1
-red_packet_max_amount = 10000
-red_packet_min_count = 1
-red_packet_max_count = 100
-red_packet_expire_hours = 24
-
-# ---- 转账功能 ----
-private_transfer_mode = false
-transfer_min_amount = 1
-transfer_max_amount = 10000
-transfer_daily_limit = 50000
-transfer_fee_rate = 0.0
-
-# ---- 签到配置 ----
-checkin_base_score = 10
-checkin_streak_bonus = 2
-checkin_max_streak_bonus = 20
-checkin_random_min = 0
-checkin_random_max = 5
-
-# ---- 自动续期 ----
-auto_renew_enabled = false
-auto_renew_days = 30
-auto_renew_cost = 100
-auto_renew_before_days = 3
-auto_renew_notify = true
-
 # ---- 邀请系统 ----
 invite_enabled = false
-invite_reward = 50
 invite_limit = 10
 
 # ---- 无 Emby 账户用户清理 ----
@@ -256,8 +212,6 @@ enabled = true
 expired_check_time = "03:00"
 # 即将过期提醒时间
 expiring_check_time = "09:00"
-# 自动续期检查时间
-auto_renew_time = "02:00"
 # 每日统计生成时间
 daily_stats_time = "00:05"
 # 会话清理间隔（小时）
