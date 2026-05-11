@@ -287,6 +287,28 @@ async def renew_user(uid: int):
     return api_response(success, message)
 
 
+@admin_bp.route('/users/<int:uid>/reset-password', methods=['POST'])
+@require_auth
+@require_admin
+async def reset_user_password(uid: int):
+    """重置用户密码并返回新密码（管理员）。"""
+    user = await UserOperate.get_user_by_uid(uid)
+    if not user:
+        return api_response(False, "用户不存在", code=404)
+
+    # 不允许重置其他管理员密码，降低越权风险
+    if user.ROLE == Role.ADMIN.value and user.UID != g.current_user.UID:
+        return api_response(False, "不允许重置其他管理员密码", code=403)
+
+    success, message, new_password = await UserService.reset_password(user)
+    if not success:
+        return api_response(False, message, code=400)
+
+    return api_response(True, message, {
+        'new_password': new_password,
+    })
+
+
 @admin_bp.route('/users/<int:uid>/kick', methods=['POST'])
 @require_auth
 @require_admin

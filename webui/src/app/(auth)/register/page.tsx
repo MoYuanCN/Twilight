@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
-import { Eye, EyeOff, ArrowRight, Loader2, ShieldPlus, UserPlus, Clock3, Bot } from "lucide-react";
+import { Eye, EyeOff, ArrowRight, Loader2, ShieldPlus, UserPlus, Clock3, Bot, ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -329,6 +330,15 @@ export default function RegisterPage() {
 
   return (
     <main className="relative flex min-h-screen w-full items-center justify-center p-4">
+      <div className="absolute left-4 top-4 z-30">
+        <Button asChild variant="secondary" size="sm" className="shadow-sm">
+          <Link href="/login">
+            <ArrowLeft className="mr-2 h-4 w-4" />
+            返回登录页
+          </Link>
+        </Button>
+      </div>
+
       <motion.div
         initial={{ opacity: 0, scale: 0.95, y: 20 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -527,6 +537,12 @@ export default function RegisterPage() {
                         <UserPlus className="mr-2 h-5 w-5" />
                       )}
                       {registerTarget === "system" ? "注册系统账号" : "提交 Emby 注册队列"}
+                    </Button>
+                  </div>
+
+                  <div className="pt-1 text-center">
+                    <Button asChild variant="link" className="h-auto px-1 text-sm">
+                      <Link href="/login">已有账号？返回登录页</Link>
                     </Button>
                   </div>
                 </form>

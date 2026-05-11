@@ -434,19 +434,19 @@ class ApiClient {
 
   // Emby
   async getEmbyInfo() {
-    return this.request<EmbyInfo>("/emby/info");
+    return this.request<EmbyInfo>("/emby/status");
   }
 
   async getMySessions() {
-    return this.request<EmbySession[]>("/emby/sessions/my");
+    return this.request<EmbySession[]>("/users/me/sessions");
   }
 
   async getMyDevices() {
-    return this.request<EmbyDevice[]>("/emby/devices/my");
+    return this.request<EmbyDevice[]>("/users/me/devices");
   }
 
   async removeDevice(deviceId: string) {
-    return this.request(`/emby/devices/${deviceId}`, {
+    return this.request(`/users/me/devices/${deviceId}`, {
       method: "DELETE",
     });
   }
