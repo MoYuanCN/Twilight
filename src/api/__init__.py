@@ -36,31 +36,16 @@ def create_app() -> Flask:
     
     # CORS 跨域支持
     if APIConfig.CORS_ENABLED:
-        cors_origins = APIConfig.CORS_ORIGINS or []
-        if not cors_origins:
-            if APIConfig.DEBUG:
-                cors_origins = [
-                    "http://localhost:3000",
-                    "http://127.0.0.1:3000",
-                    "http://localhost:5173",
-                    "http://127.0.0.1:5173",
-                ]
-            else:
-                import logging
-                logging.getLogger(__name__).error(
-                    "⚠️ CORS 已启用但未配置 cors_origins，已自动禁用跨域访问"
-                )
-                cors_origins = []
+        cors_origins = APIConfig.CORS_ORIGINS or "*"
 
-        if cors_origins:
-            CORS(
-                app,
-                resources={r"/api/*": {"origins": cors_origins}},
-                supports_credentials=True,
-                allow_headers=['Content-Type', 'Authorization', 'X-API-Key'],
-                methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-                max_age=3600,
-            )
+        CORS(
+            app,
+            resources={r"/api/*": {"origins": cors_origins}},
+            supports_credentials=True,
+            allow_headers=['Content-Type', 'Authorization', 'X-API-Key'],
+            methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+            max_age=3600,
+        )
     
     # 注册旧版 API（兼容）
     app.register_blueprint(api)

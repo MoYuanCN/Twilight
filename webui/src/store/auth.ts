@@ -21,8 +21,14 @@ export const useAuthStore = create<AuthState>()(
       isLoading: true,
 
       initialize: async () => {
-        // Cookie 会话模式：始终向后端探测当前会话
-        await get().fetchUser();
+        // 仅在本地有登录态快照时探测会话，避免未登录场景请求 /users/me
+        const { isAuthenticated, user } = get();
+        if (isAuthenticated || !!user?.uid) {
+          await get().fetchUser();
+          return;
+        }
+
+        set({ user: null, isAuthenticated: false, isLoading: false });
       },
 
       login: async (username: string, password: string) => {
