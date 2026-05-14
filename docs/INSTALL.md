@@ -357,6 +357,12 @@ emby_token = "your_token_here"
 [Telegram]
 bot_token = "your_bot_token"
 admin_id = [123456789]
+# 可选：当 Bot 与 API 不在同一网络命名空间时，指定回调目标
+bind_confirm_api_url = "http://127.0.0.1:5000"
+
+[Security]
+# Bot 调用内部绑定确认接口时使用
+bot_internal_secret = "replace_with_strong_secret"
 
 [SAR]
 register_mode = true
@@ -423,6 +429,14 @@ netstat -ano | findstr :5000
 # 杀死占用进程（替换 PID）
 taskkill /PID <PID> /F
 ```
+
+#### 4. Telegram 绑定失败
+
+如果出现 Telegram `/bind` 后仍无法确认绑定，优先检查：
+
+- `Security.bot_internal_secret` 是否已配置且与 Bot 侧一致
+- Bot 到 API 的回调地址是否可达（必要时设置 `Telegram.bind_confirm_api_url`）
+- 多进程部署是否已配置 `Global.redis_url`（未配置 Redis 时，跨进程绑定码可能无法共享）
 
 ### Linux 常见问题
 

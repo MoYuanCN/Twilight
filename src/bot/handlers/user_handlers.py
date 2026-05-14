@@ -8,7 +8,7 @@
 """
 import asyncio
 import logging
-import time
+from typing import Any
 
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes, CommandHandler, CallbackQueryHandler, MessageHandler, filters
@@ -24,34 +24,7 @@ from src.db.user import UserOperate, Role
 from src.config import Config
 
 logger = logging.getLogger(__name__)
-
-_bind_states = {}
-_BIND_STATE_TTL = 10 * 60
-
-
-def _set_bind_state(uid: int, state: dict):
-    payload = dict(state)
-    payload['_ts'] = int(time.time())
-    _bind_states[uid] = payload
-
-
-def _get_bind_state(uid: int):
-    state = _bind_states.get(uid)
-    if not state:
-        return None
-
-    ts = int(state.get('_ts', 0))
-    if ts <= 0 or int(time.time()) - ts > _BIND_STATE_TTL:
-        _bind_states.pop(uid, None)
-        return None
-
-    payload = dict(state)
-    payload.pop('_ts', None)
-    return payload
-
-
-def _clear_bind_state(uid: int) -> bool:
-    return _bind_states.pop(uid, None) is not None
+BIND_STATE_KEY = "bind_wait_code"
 
 
 def register(bot):
@@ -323,11 +296,78 @@ def register(bot):
 
     # ======================== 绑定命令（始终可用） ========================
 
-    async def _confirm_bind_and_reply(update: Update, telegram_id: int, bind_code: str) -> bool:
-        from src.api.v1.users import confirm_tg_bind_internal
+    async def _confirm_bind_via_api(bind_code: str, telegram_id: int) -> tuple[bool, str, dict[str, Any] | None, bool]:
+        """优先通过 API 回调确认绑定，返回 (ok, message, data, should_fallback_internal)。"""
+        import requests
+        from src.config import SecurityConfig, APIConfig, TelegramConfig
 
-        ok, message, d, _ = await confirm_tg_bind_internal(bind_code, telegram_id)
+        bot_secret = (SecurityConfig.BOT_INTERNAL_SECRET or '').strip()
+        if not bot_secret:
+            return False, "Bot 内部密钥未配置，无法通过 API 回调确认绑定", None, True
+
+        api_urls = []
+        custom_url = (TelegramConfig.BIND_CONFIRM_API_URL or '').strip()
+        if custom_url:
+            if custom_url.endswith('/api/v1/users/me/telegram/bind-confirm'):
+                api_urls.append(custom_url)
+            else:
+                api_urls.append(f"{custom_url.rstrip('/')}/api/v1/users/me/telegram/bind-confirm")
+
+        api_urls.extend([
+            f"http://127.0.0.1:{APIConfig.PORT}/api/v1/users/me/telegram/bind-confirm",
+            f"http://localhost:{APIConfig.PORT}/api/v1/users/me/telegram/bind-confirm",
+        ])
+
+        last_err = ""
+        for api_url in api_urls:
+            try:
+                resp = await asyncio.to_thread(
+                    requests.post,
+                    api_url,
+                    json={
+                        'bind_code': bind_code,
+                        'telegram_id': telegram_id,
+                        'bot_secret': bot_secret,
+                    },
+                    timeout=8,
+                )
+                result = resp.json() if resp.content else {}
+
+                if isinstance(result, dict):
+                    ok = bool(result.get('success'))
+                    message = str(result.get('message') or ("绑定成功" if ok else "绑定失败"))
+                    data = result.get('data') if isinstance(result.get('data'), dict) else {}
+                    # API 已给出业务结果时，不再回退内部逻辑，避免重复处理
+                    return ok, message, data, False
+
+                last_err = f"接口响应格式无效: {api_url}"
+            except Exception as exc:
+                last_err = f"调用失败 {api_url}: {exc}"
+
+        return False, last_err or "API 回调不可用", None, True
+
+    async def _confirm_bind_and_reply(update: Update, telegram_id: int, bind_code: str) -> bool:
+        ok, message, d, should_fallback_internal = await _confirm_bind_via_api(bind_code, telegram_id)
+
+        if should_fallback_internal:
+            try:
+                from src.api.v1.users import confirm_tg_bind_internal
+                ok, message, d, _ = await confirm_tg_bind_internal(bind_code, telegram_id)
+            except Exception as exc:
+                logger.error("TG 绑定内部回退失败: %s", exc)
+                ok = False
+                message = f"绑定回调不可用，且内部回退失败: {exc}"
+                d = {}
+
+        d = d or {}
         if ok:
+            # 注册绑定码验证成功时仅返回 telegram_id，这里给出更友好提示
+            if not d.get('username'):
+                await update.message.reply_text(
+                    "✅ Telegram 绑定码验证成功！\n\n请返回网页继续提交注册。"
+                )
+                return True
+
             info_lines = [
                 "✅ **绑定成功！**\n",
                 f"👤 **用户名**: `{d.get('username', '')}`",
@@ -353,7 +393,7 @@ def register(bot):
             return
 
         cancelled = []
-        if _clear_bind_state(uid):
+        if context.user_data.pop(BIND_STATE_KEY, None):
             cancelled.append("绑定流程")
 
         try:
@@ -385,7 +425,7 @@ def register(bot):
             return
 
         if not context.args or len(context.args) < 1:
-            _set_bind_state(telegram_id, {'action': 'bind_wait_code'})
+            context.user_data[BIND_STATE_KEY] = True
             await update.message.reply_text(
                 "📨 请输入 8 位绑定码以完成绑定\n\n"
                 "💡 获取方式: 网页端个人中心/注册页\n"
@@ -396,18 +436,18 @@ def register(bot):
 
         bind_code = context.args[0].strip().upper()
         if len(bind_code) != 8 or not bind_code.isalnum():
-            _set_bind_state(telegram_id, {'action': 'bind_wait_code'})
+            context.user_data[BIND_STATE_KEY] = True
             await update.message.reply_text("❌ 绑定码格式不正确，请发送 8 位字母数字绑定码，或发送 /cancel 取消")
             return
 
         try:
             if await _confirm_bind_and_reply(update, telegram_id, bind_code):
-                _clear_bind_state(telegram_id)
+                context.user_data.pop(BIND_STATE_KEY, None)
             else:
-                _set_bind_state(telegram_id, {'action': 'bind_wait_code'})
+                context.user_data[BIND_STATE_KEY] = True
         except Exception as e:
             logger.error(f"TG 绑定回调失败: {e}")
-            _set_bind_state(telegram_id, {'action': 'bind_wait_code'})
+            context.user_data[BIND_STATE_KEY] = True
             await update.message.reply_text("❌ 绑定失败，请稍后重试或联系管理员。你也可以重新发送绑定码，或发送 /cancel 取消")
 
     @require_private
@@ -417,8 +457,7 @@ def register(bot):
             return
 
         telegram_id = update.effective_user.id
-        state = _get_bind_state(telegram_id)
-        if not state or state.get('action') != 'bind_wait_code':
+        if not context.user_data.get(BIND_STATE_KEY):
             return
 
         text = (update.message.text or '').strip()
@@ -426,13 +465,13 @@ def register(bot):
             return
 
         if text.lower() in {'/cancel', 'cancel', '取消', '返回'}:
-            _clear_bind_state(telegram_id)
+            context.user_data.pop(BIND_STATE_KEY, None)
             await update.message.reply_text("✅ 已取消绑定流程")
             return
 
         existing = await UserOperate.get_user_by_telegram_id(telegram_id)
         if existing:
-            _clear_bind_state(telegram_id)
+            context.user_data.pop(BIND_STATE_KEY, None)
             await update.message.reply_text(
                 f"⚠️ 您已绑定账号: `{existing.USERNAME}`\n"
                 "如需更换，请在网页端操作",
@@ -451,7 +490,7 @@ def register(bot):
 
         try:
             if await _confirm_bind_and_reply(update, telegram_id, bind_code):
-                _clear_bind_state(telegram_id)
+                context.user_data.pop(BIND_STATE_KEY, None)
         except Exception as e:
             logger.error(f"TG 绑定处理失败: {e}")
             await update.message.reply_text("❌ 绑定失败，请稍后重试或联系管理员。你也可以重新发送绑定码，或发送 /cancel 取消")

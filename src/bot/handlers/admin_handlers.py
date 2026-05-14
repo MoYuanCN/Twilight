@@ -548,10 +548,12 @@ def register(bot):
 
     # ======================== 文本消息路由（admin 状态机）========================
 
-    @require_admin
     async def handle_admin_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         """处理管理员文本输入（根据状态机路由）"""
         uid = update.effective_user.id
+        if not is_admin(uid):
+            return
+
         state = _get_admin_state(uid)
         if not state:
             return  # 无状态，忽略

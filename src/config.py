@@ -256,6 +256,7 @@ class TelegramConfig(BaseConfig):
     """Telegram配置管理类"""
     TELEGRAM_API_URL: str = 'https://api.telegram.org/bot'
     BOT_TOKEN: str = ''
+    BIND_CONFIRM_API_URL: str = ''  # Bot 绑定确认回调地址（可填完整接口或后端基础地址）
     ADMIN_ID: Union[int, List[int]] = []
     GROUP_ID: Union[int, str, List[Union[int, str]]] = []  # 支持数字ID或 @channelusername
     CHANNEL_ID: Union[int, str, List[Union[int, str]]] = []  # 支持数字ID或 @channelusername
