@@ -106,14 +106,42 @@ async def run_all():
     logger.info(f"✅ API 服务器已在后台启动 (端口 {APIConfig.PORT})")
     
     # 2. 启动 Bot（如果启用）
-    bot = None
+    bot_thread = None
+    bot_stop_event = threading.Event()
+
+    def run_bot_in_thread():
+        """在独立线程中运行 Bot，使用单独事件循环。"""
+        async def _bot_worker():
+            from src.bot import start_bot, stop_bot
+
+            bot = await start_bot()
+            if not bot:
+                logger.warning("⚠️ Telegram Bot 启动失败")
+                return
+
+            logger.info("✅ Telegram Bot 已在线程中启动")
+
+            try:
+                while not bot_stop_event.is_set():
+                    await asyncio.sleep(1)
+            finally:
+                await stop_bot()
+                logger.info("👋 Telegram Bot 线程已关闭")
+
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(_bot_worker())
+        except Exception:
+            logger.exception("❌ Telegram Bot 线程异常退出")
+        finally:
+            loop.run_until_complete(loop.shutdown_asyncgens())
+            loop.close()
+
     if Config.TELEGRAM_MODE and TelegramConfig.BOT_TOKEN:
-        from src.bot import start_bot
-        bot = await start_bot()
-        if bot:
-            logger.info("✅ Telegram Bot 已启动")
-        else:
-            logger.warning("⚠️ Telegram Bot 启动失败")
+        bot_thread = threading.Thread(target=run_bot_in_thread, daemon=True, name="twilight-bot-thread")
+        bot_thread.start()
+        logger.info("✅ Telegram Bot 线程已启动")
     else:
         logger.info("ℹ️ Telegram Bot 未启用")
     
@@ -130,9 +158,13 @@ async def run_all():
             await asyncio.sleep(3600)
     except (KeyboardInterrupt, SystemExit):
         logger.info("🛑 正在关闭所有服务...")
-        if bot:
-            from src.bot import stop_bot
-            await stop_bot()
+
+        if bot_thread and bot_thread.is_alive():
+            bot_stop_event.set()
+            bot_thread.join(timeout=10)
+            if bot_thread.is_alive():
+                logger.warning("⚠️ Telegram Bot 线程未在超时时间内结束")
+
         await SchedulerService.stop()
         logger.info("👋 服务已关闭")
 
