@@ -72,6 +72,15 @@ class TelegramBindCodeModel(UsersDatabaseModel):
     EXPIRES_AT: Mapped[int] = mapped_column(Integer, index=True, nullable=False)
 
 
+class AuthTokenModel(UsersDatabaseModel):
+    __tablename__ = 'auth_tokens'
+
+    TOKEN: Mapped[str] = mapped_column(String(64), primary_key=True)
+    UID: Mapped[int] = mapped_column(Integer, index=True, nullable=False)
+    CREATED_AT: Mapped[int] = mapped_column(Integer, default=lambda: int(time.time()), nullable=False)
+    EXPIRES_AT: Mapped[int] = mapped_column(Integer, index=True, nullable=False)
+
+
 class TelegramBindCodeOperate:
     @staticmethod
     async def upsert_code(
@@ -216,6 +225,72 @@ class TelegramBindCodeOperate:
                 await session.execute(
                     delete(TelegramBindCodeModel)
                     .where(TelegramBindCodeModel.CODE.in_(codes))
+                )
+
+
+class AuthTokenOperate:
+    @staticmethod
+    async def upsert_token(token: str, uid: int, created_at: int, expires_at: int) -> AuthTokenModel:
+        async with UsersSessionFactory() as session:
+            async with session.begin():
+                existing = await session.get(AuthTokenModel, token)
+                if existing:
+                    existing.UID = uid
+                    existing.CREATED_AT = created_at
+                    existing.EXPIRES_AT = expires_at
+                    await session.flush()
+                    return existing
+
+                item = AuthTokenModel(
+                    TOKEN=token,
+                    UID=uid,
+                    CREATED_AT=created_at,
+                    EXPIRES_AT=expires_at,
+                )
+                session.add(item)
+                await session.flush()
+                return item
+
+    @staticmethod
+    async def get_token(token: str) -> Optional[AuthTokenModel]:
+        now = int(time.time())
+        async with UsersSessionFactory() as session:
+            scalar = await session.execute(
+                select(AuthTokenModel)
+                .where(
+                    AuthTokenModel.TOKEN == token,
+                    AuthTokenModel.EXPIRES_AT > now,
+                )
+                .limit(1)
+            )
+            return scalar.scalar_one_or_none()
+
+    @staticmethod
+    async def delete_token(token: str) -> None:
+        async with UsersSessionFactory() as session:
+            async with session.begin():
+                await session.execute(
+                    delete(AuthTokenModel)
+                    .where(AuthTokenModel.TOKEN == token)
+                )
+
+    @staticmethod
+    async def delete_user_tokens(uid: int) -> None:
+        async with UsersSessionFactory() as session:
+            async with session.begin():
+                await session.execute(
+                    delete(AuthTokenModel)
+                    .where(AuthTokenModel.UID == uid)
+                )
+
+    @staticmethod
+    async def cleanup_expired() -> None:
+        now = int(time.time())
+        async with UsersSessionFactory() as session:
+            async with session.begin():
+                await session.execute(
+                    delete(AuthTokenModel)
+                    .where(AuthTokenModel.EXPIRES_AT <= now)
                 )
 
 

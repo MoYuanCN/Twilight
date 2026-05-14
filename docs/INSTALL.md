@@ -124,7 +124,7 @@ python main.py all
 pip install uvicorn
 
 # 运行应用
-uvicorn asgi:app --host 0.0.0.0 --port 5000 --workers 4
+uvicorn asgi:app --host 0.0.0.0 --port 5000 --workers 1
 
 # 或部署为 Windows 服务...
 ```

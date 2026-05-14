@@ -13,7 +13,7 @@ from flask import Blueprint, request, g, jsonify
 
 from src.config import APIConfig, Config, SecurityConfig
 from src.core.utils import verify_password, timestamp
-from src.db.user import UserOperate, UserModel, Role
+from src.db.user import UserOperate, UserModel, Role, AuthTokenOperate
 from src.db.login_log import LoginLogOperate, LoginLogModel
 from src.services import UserService
 
@@ -26,10 +26,8 @@ logger = logging.getLogger(__name__)
 
 auth_bp = Blueprint('auth', __name__, url_prefix='/auth')
 
-# token 存储：优先使用 Redis，未配置时回退内存（单进程有效）
-_token_store: dict[str, dict] = {}
+# token 存储：优先使用 Redis，未配置时回退数据库（支持多进程）
 _redis_client: Optional["Redis"] = None
-_MAX_INMEMORY_TOKENS = 100000
 _AUTH_COOKIE_NAME = "twilight_session"
 
 # 登录速率限制：IP -> (失败次数, 首次失败时间戳)
@@ -171,35 +169,13 @@ def _clear_auth_cookie(response) -> None:
     )
 
 
-def _cleanup_inmemory_tokens() -> None:
-    """清理内存 token：删除过期项并控制最大容量。"""
-    if not _token_store:
-        return
-
-    now = timestamp()
-    expired = [tk for tk, data in _token_store.items() if now > int(data.get('expires_at', 0) or 0)]
-    for tk in expired:
-        _token_store.pop(tk, None)
-
-    if len(_token_store) <= _MAX_INMEMORY_TOKENS:
-        return
-
-    overflow = len(_token_store) - _MAX_INMEMORY_TOKENS
-    oldest = sorted(
-        _token_store.items(),
-        key=lambda item: int(item[1].get('created_at', 0) or 0)
-    )[:overflow]
-    for tk, _ in oldest:
-        _token_store.pop(tk, None)
-
-
 async def _get_redis() -> Optional["Redis"]:
-    """延迟初始化 Redis 客户端，未配置时返回 None。"""
+    """延迟初始化 Redis 客户端，未配置时返回 None（会回退 DB token 存储）。"""
     global _redis_client
     if not Config.REDIS_URL:
         return None
     if Redis is None:
-        logger.warning("检测到 REDIS_URL 但未安装 redis 依赖，回退为内存 token 存储")
+        logger.warning("检测到 REDIS_URL 但未安装 redis 依赖，回退为数据库 token 存储")
         return None
     if _redis_client is None:
         _redis_client = Redis.from_url(Config.REDIS_URL, decode_responses=True, encoding="utf-8")
@@ -222,9 +198,15 @@ async def _load_token(token: str) -> Optional[dict]:
             await redis_client.delete(_token_key(token))
             return None
         except Exception as exc:  # pragma: no cover - redis 挂掉时回退
-            logger.warning("Redis token store 读取失败，回退内存：%s", exc)
-    _cleanup_inmemory_tokens()
-    return _token_store.get(token)
+            logger.warning("Redis token store 读取失败，回退数据库：%s", exc)
+    token_model = await AuthTokenOperate.get_token(token)
+    if not token_model:
+        return None
+    return {
+        'uid': int(token_model.UID),
+        'created_at': int(token_model.CREATED_AT),
+        'expires_at': int(token_model.EXPIRES_AT),
+    }
 
 
 async def _store_token(token: str, uid: int) -> dict:
@@ -244,12 +226,10 @@ async def _store_token(token: str, uid: int) -> dict:
             pipe.expire(_user_tokens_key(uid), APIConfig.TOKEN_EXPIRE)
             await pipe.execute()
         except Exception as exc:  # pragma: no cover
-            logger.warning("Redis token store 写入失败，回退内存：%s", exc)
-            _token_store[token] = payload
-            return payload
+            logger.warning("Redis token store 写入失败，回退数据库：%s", exc)
+            await AuthTokenOperate.upsert_token(token, uid, payload['created_at'], payload['expires_at'])
     else:
-        _token_store[token] = payload
-        _cleanup_inmemory_tokens()
+        await AuthTokenOperate.upsert_token(token, uid, payload['created_at'], payload['expires_at'])
     return payload
 
 def require_auth(f: Callable) -> Callable:
@@ -336,10 +316,9 @@ async def revoke_token(token: str, uid: Optional[int] = None):
             if uid is not None:
                 pipe.srem(_user_tokens_key(uid), token)
             await pipe.execute()
-            return
         except Exception as exc:  # pragma: no cover
-            logger.warning("Redis token 撤销失败，回退内存：%s", exc)
-    _token_store.pop(token, None)
+            logger.warning("Redis token 撤销失败，回退数据库：%s", exc)
+    await AuthTokenOperate.delete_token(token)
 
 
 async def revoke_user_tokens(uid: int):
@@ -354,15 +333,9 @@ async def revoke_user_tokens(uid: int):
                     pipe.delete(_token_key(token))
                 pipe.delete(_user_tokens_key(uid))
                 await pipe.execute()
-            return
         except Exception as exc:  # pragma: no cover
-            logger.warning("Redis 批量撤销 token 失败，回退内存：%s", exc)
-    tokens_to_remove = [
-        token for token, data in _token_store.items()
-        if data.get('uid') == uid
-    ]
-    for token in tokens_to_remove:
-        _token_store.pop(token, None)
+            logger.warning("Redis 批量撤销 token 失败，回退数据库：%s", exc)
+    await AuthTokenOperate.delete_user_tokens(uid)
 
 
 # ==================== 登录相关 ====================

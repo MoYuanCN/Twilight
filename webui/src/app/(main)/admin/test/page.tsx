@@ -11,7 +11,6 @@ import { useToast } from "@/hooks/use-toast";
 const FEATURE_LABELS: Record<string, string> = {
   register: "开放注册",
   telegram: "Telegram Bot",
-  invite: "邀请系统",
   force_bind_telegram: "强制绑定 Telegram",
 };
 

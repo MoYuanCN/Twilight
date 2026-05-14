@@ -94,7 +94,6 @@ async def get_system_info():
             'register': RegisterConfig.REGISTER_MODE,
             'emby_direct_register': RegisterConfig.EMBY_DIRECT_REGISTER_ENABLED,
             'telegram': Config.TELEGRAM_MODE,
-            'invite': RegisterConfig.INVITE_ENABLED,
             'force_bind_telegram': Config.FORCE_BIND_TELEGRAM,
         },
         'limits': {
@@ -241,8 +240,6 @@ async def get_admin_config():
             'logging': Config.LOGGING,
             'log_level': Config.LOG_LEVEL,
             'telegram_mode': Config.TELEGRAM_MODE,
-            'email_bind': Config.EMAIL_BIND,
-            'force_bind_email': Config.FORCE_BIND_EMAIL,
             'force_bind_telegram': Config.FORCE_BIND_TELEGRAM,
         },
         'emby': {
@@ -266,7 +263,6 @@ async def get_admin_config():
             'emby_direct_register_max_queue': RegisterConfig.EMBY_DIRECT_REGISTER_MAX_QUEUE,
             'emby_direct_register_status_ttl': RegisterConfig.EMBY_DIRECT_REGISTER_STATUS_TTL,
             'user_limit': RegisterConfig.USER_LIMIT,
-            'invite_enabled': RegisterConfig.INVITE_ENABLED,
         },
         'device_limit': {
             'enabled': DeviceLimitConfig.DEVICE_LIMIT_ENABLED,
@@ -461,12 +457,9 @@ async def get_config_schema():
                     {'key': 'sqlalchemy_log', 'label': 'SQLAlchemy 日志', 'type': 'bool', 'description': '是否输出 SQLAlchemy ORM 日志（调试用）', 'value': Config.SQLALCHEMY_LOG},
                     {'key': 'max_retry', 'label': '最大重试次数', 'type': 'int', 'description': 'HTTP 请求失败时的最大重试次数', 'value': Config.MAX_RETRY},
                     {'key': 'databases_dir', 'label': '数据库目录', 'type': 'string', 'description': 'SQLite 数据库文件存储目录', 'value': str(Config.DATABASES_DIR)},
-                    {'key': 'redis_url', 'label': 'Redis 连接', 'type': 'string', 'description': 'Redis 连接串，如 redis://localhost:6379/0，留空则使用内存存储', 'value': Config.REDIS_URL},
+                    {'key': 'redis_url', 'label': 'Redis 连接', 'type': 'string', 'description': 'Redis 连接串，如 redis://localhost:6379/0；留空则不使用 Redis，加锁/会话回退数据库', 'value': Config.REDIS_URL},
                     {'key': 'bangumi_token', 'label': 'Bangumi Token', 'type': 'secret', 'description': 'Bangumi API 访问令牌', 'value': Config.BANGUMI_TOKEN},
-                    {'key': 'global_bgm_mode', 'label': 'BGM 点格子', 'type': 'bool', 'description': '是否允许用户使用 Bangumi 同步点格子功能', 'value': Config.GLOBAL_BGM_MODE},
                     {'key': 'telegram_mode', 'label': 'Telegram 模式', 'type': 'bool', 'description': '是否启用 Telegram Bot 功能', 'value': Config.TELEGRAM_MODE},
-                    {'key': 'email_bind', 'label': '邮箱绑定', 'type': 'bool', 'description': '是否允许用户绑定邮箱', 'value': Config.EMAIL_BIND},
-                    {'key': 'force_bind_email', 'label': '强制绑定邮箱', 'type': 'bool', 'description': '是否强制用户绑定邮箱后才能使用', 'value': Config.FORCE_BIND_EMAIL},
                     {'key': 'force_bind_telegram', 'label': '强制绑定 Telegram', 'type': 'bool', 'description': '是否强制用户绑定 Telegram', 'value': Config.FORCE_BIND_TELEGRAM},
                     {'key': 'tmdb_api_key', 'label': 'TMDB API Key', 'type': 'secret', 'description': 'TMDB API Key (v3)，用于获取影视元数据', 'value': Config.TMDB_API_KEY},
                     {'key': 'tmdb_api_url', 'label': 'TMDB API 地址', 'type': 'string', 'description': 'TMDB API 服务器地址', 'value': Config.TMDB_API_URL},
@@ -507,7 +500,7 @@ async def get_config_schema():
             {
                 'key': 'SAR',
                 'title': '注册与用户策略',
-                'description': '注册、用户限制、邀请与 Emby 自由注册配置',
+                'description': '注册、用户限制与 Emby 自由注册配置',
                 'fields': [
                     {'key': 'register_mode', 'label': '注册模式', 'type': 'bool', 'description': '是否开放注册', 'value': RegisterConfig.REGISTER_MODE},
                     {'key': 'register_code_limit', 'label': '注册码限制', 'type': 'bool', 'description': '是否限制必须使用注册码注册', 'value': RegisterConfig.REGISTER_CODE_LIMIT},
@@ -524,8 +517,6 @@ async def get_config_schema():
                     {'key': 'admin_usernames', 'label': '管理员用户名', 'type': 'string', 'description': '管理员用户名列表，逗号分隔', 'value': RegisterConfig.ADMIN_USERNAMES},
                     {'key': 'white_list_uids', 'label': '白名单 UID', 'type': 'string', 'description': '白名单 UID 列表，逗号分隔', 'value': RegisterConfig.WHITE_LIST_UIDS},
                     {'key': 'white_list_usernames', 'label': '白名单用户名', 'type': 'string', 'description': '白名单用户名列表，逗号分隔', 'value': RegisterConfig.WHITE_LIST_USERNAMES},
-                    {'key': 'invite_enabled', 'label': '邀请系统', 'type': 'bool', 'description': '是否启用邀请系统', 'value': RegisterConfig.INVITE_ENABLED},
-                    {'key': 'invite_limit', 'label': '邀请上限', 'type': 'int', 'description': '每人最多邀请数量（-1 = 无限制）', 'value': RegisterConfig.INVITE_LIMIT},
                 ],
             },
             {
