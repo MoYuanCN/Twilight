@@ -68,6 +68,9 @@ python main.py all          # 全部启动
 
 # 生产环境
 uvicorn asgi:app --host 0.0.0.0 --port 5000 --workers 4
+
+# 生产脚本（后端 + 可选 Bot）
+TWILIGHT_WITH_BOT=1 bash ./start_backend_prod.sh
 ```
 
 ### 前端（可选）
