@@ -349,6 +349,15 @@ def register(bot):
     async def _confirm_bind_and_reply(update: Update, telegram_id: int, bind_code: str) -> bool:
         ok, message, d, should_fallback_internal = await _confirm_bind_via_api(bind_code, telegram_id)
 
+        # 多 worker 且未启用共享存储时，绑定码可能落在其他 worker 的内存中；
+        # 对“绑定码无效或已过期”做短重试，尽量命中正确 worker。
+        if (not ok) and (not should_fallback_internal) and ("绑定码无效或已过期" in (message or "")):
+            for _ in range(6):
+                await asyncio.sleep(0.25)
+                ok, message, d, should_fallback_internal = await _confirm_bind_via_api(bind_code, telegram_id)
+                if ok or should_fallback_internal or ("绑定码无效或已过期" not in (message or "")):
+                    break
+
         if should_fallback_internal:
             try:
                 from src.api.v1.users import confirm_tg_bind_internal
@@ -380,9 +389,18 @@ def register(bot):
             await update.message.reply_text("\n".join(info_lines), parse_mode="Markdown")
             return True
 
-        await update.message.reply_text(
-            f"❌ 绑定失败: {message or '未知错误'}\n\n请重新发送 8 位绑定码，或发送 /cancel 取消"
-        )
+        if "绑定码无效或已过期" in (message or ""):
+            await update.message.reply_text(
+                "❌ 绑定失败: 绑定码无效或已过期\n\n"
+                "请确认刚刚生成的是最新 8 位绑定码后重试。\n"
+                "若后端使用多 worker（如 uvicorn --workers 4），请配置 Redis 共享存储，"
+                "或临时改为单 worker 再绑定。\n\n"
+                "你可以重新发送绑定码，或发送 /cancel 取消。"
+            )
+        else:
+            await update.message.reply_text(
+                f"❌ 绑定失败: {message or '未知错误'}\n\n请重新发送 8 位绑定码，或发送 /cancel 取消"
+            )
         return False
 
     @require_private
