@@ -18,6 +18,7 @@ if exist ".venv\Scripts\python.exe" (
 if "%TWILIGHT_WITH_BOT%"=="" set "TWILIGHT_WITH_BOT=1"
 if "%TWILIGHT_FORCE_RESTART_BOT%"=="" set "TWILIGHT_FORCE_RESTART_BOT=0"
 if "%TWILIGHT_BOT_LOCK_FILE%"=="" set "TWILIGHT_BOT_LOCK_FILE=%~dp0db\telegram_bot.lock"
+if "%TWILIGHT_UVICORN_WORKERS%"=="" set "TWILIGHT_UVICORN_WORKERS=1"
 
 echo Using Python: %PYTHON%
 echo Mode: production (uvicorn)
@@ -48,7 +49,7 @@ if "%TWILIGHT_WITH_BOT%"=="1" (
 )
 
 :RUN_API
-"%PYTHON%" -m uvicorn asgi:app --host 0.0.0.0 --port 5000 --workers 4 %*
+"%PYTHON%" -m uvicorn asgi:app --host 0.0.0.0 --port 5000 --workers %TWILIGHT_UVICORN_WORKERS% %*
 set "EXIT_CODE=%ERRORLEVEL%"
 
 if not "%EXIT_CODE%"=="0" (
