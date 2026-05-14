@@ -22,27 +22,27 @@ _bot_instance: Optional['TelegramBot'] = None
 
 
 class TelegramBot:
-        KNOWN_COMMANDS = {
-            "start", "help", "me", "bind", "cancel",
-            "admin", "adduser", "regcode", "broadcast", "stats", "userinfo",
-            "emby", "lines", "resetpwd", "playinfo", "sessions", "kick",
-        }
-
-        KNOWN_CALLBACK_EXACT = {
-            "back_start", "close_msg", "panel_help", "panel_user", "user_tg_info",
-            "user_unbindtg_confirm", "user_playinfo", "panel_admin", "admin_users",
-            "admin_regcode", "admin_stats", "admin_emby", "admin_broadcast",
-            "adm_queryuser", "adm_adduser", "adm_banmenu", "adm_regcode_gen",
-            "adm_regcode_list", "adm_emby_test", "adm_emby_sessions", "adm_emby_users",
-            "adm_emby_cleanup", "adm_emby_cleanup_confirm", "noop", "panel_emby",
-            "emby_lines", "emby_resetpwd", "emby_playinfo",
-        }
-
-        KNOWN_CALLBACK_PREFIX = (
-            "adm_userlist:", "adm_act:", "adm_userdetail:", "adm_renew:", "adm_reggen:",
-        )
-
     """Telegram Bot 主类"""
+
+    KNOWN_COMMANDS = {
+        "start", "help", "me", "bind", "cancel",
+        "admin", "adduser", "regcode", "broadcast", "stats", "userinfo",
+        "emby", "lines", "resetpwd", "playinfo", "sessions", "kick",
+    }
+
+    KNOWN_CALLBACK_EXACT = {
+        "back_start", "close_msg", "panel_help", "panel_user", "user_tg_info",
+        "user_unbindtg_confirm", "user_playinfo", "panel_admin", "admin_users",
+        "admin_regcode", "admin_stats", "admin_emby", "admin_broadcast",
+        "adm_queryuser", "adm_adduser", "adm_banmenu", "adm_regcode_gen",
+        "adm_regcode_list", "adm_emby_test", "adm_emby_sessions", "adm_emby_users",
+        "adm_emby_cleanup", "adm_emby_cleanup_confirm", "noop", "panel_emby",
+        "emby_lines", "emby_resetpwd", "emby_playinfo",
+    }
+
+    KNOWN_CALLBACK_PREFIX = (
+        "adm_userlist:", "adm_act:", "adm_userdetail:", "adm_renew:", "adm_reggen:",
+    )
     
     def __init__(self):
         if not Config.TELEGRAM_MODE:
