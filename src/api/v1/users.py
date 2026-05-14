@@ -7,6 +7,7 @@ import json
 import hmac
 import logging
 from urllib.parse import urlparse
+from typing import Any, Optional
 from flask import Blueprint, request, g
 
 from src.api.v1.auth import require_auth, api_response
@@ -70,7 +71,7 @@ async def register():
 
     # 通过绑定码获取 Telegram ID（先解析，成功后再消费）
     if telegram_bind_code:
-        telegram_id = _get_register_bind_telegram_id(telegram_bind_code)
+        telegram_id = await _get_register_bind_telegram_id(telegram_bind_code)
         if not telegram_id:
             return api_response(False, "Telegram 绑定码无效或尚未通过 Bot 验证，请先在 Bot 中完成绑定", code=400)
 
@@ -125,8 +126,8 @@ async def register():
             return api_response(False, message, code=400)
 
         # 队列受理后消费绑定码，避免重复提交
-        if telegram_bind_code and telegram_bind_code in _tg_bind_codes:
-            del _tg_bind_codes[telegram_bind_code]
+        if telegram_bind_code:
+            await _delete_bind_code(telegram_bind_code)
 
         return api_response(True, message, {
             'registration_target': 'emby',
@@ -145,8 +146,8 @@ async def register():
         result = await UserService.register_pending(telegram_id, username, email, password)
 
     if result.result.value == 'success':
-        if telegram_bind_code and telegram_bind_code in _tg_bind_codes:
-            del _tg_bind_codes[telegram_bind_code]
+        if telegram_bind_code:
+            await _delete_bind_code(telegram_bind_code)
 
         user_info = await UserService.get_user_info(result.user) if result.user else None
         return api_response(True, result.message, {
@@ -994,10 +995,115 @@ async def unbind_my_telegram():
 import time as _time
 import secrets as _secrets
 import string as _string
+try:
+    from redis.asyncio import Redis
+except Exception:  # pragma: no cover
+    Redis = None  # type: ignore
+
 _tg_bind_codes: dict = {}
+_tg_bind_redis: Optional["Redis"] = None
 
 _BIND_CODE_EXPIRE = 300  # 绑定码有效期（秒）
 _MAX_BIND_CODES = 20000
+_TG_BIND_REDIS_KEY_PREFIX = "tw:tg:bind:"
+_TG_BIND_USER_INDEX_PREFIX = "tw:tg:bind:user:"
+
+
+def _tg_bind_redis_key(bind_code: str) -> str:
+    return f"{_TG_BIND_REDIS_KEY_PREFIX}{bind_code}"
+
+
+def _tg_bind_user_index_key(uid: int) -> str:
+    return f"{_TG_BIND_USER_INDEX_PREFIX}{uid}"
+
+
+def _tg_bind_ttl(code_info: dict[str, Any]) -> int:
+    created_at = float(code_info.get('created_at') or _time.time())
+    return max(1, int(_BIND_CODE_EXPIRE - (_time.time() - created_at)))
+
+
+def _get_tg_bind_redis() -> Optional["Redis"]:
+    from src.config import Config
+
+    if not Config.REDIS_URL or Redis is None:
+        return None
+
+    global _tg_bind_redis
+    if _tg_bind_redis is None:
+        _tg_bind_redis = Redis.from_url(Config.REDIS_URL, decode_responses=True, encoding="utf-8")
+    return _tg_bind_redis
+
+
+async def _set_bind_code_info(bind_code: str, code_info: dict[str, Any]) -> None:
+    _tg_bind_codes[bind_code] = code_info
+
+    redis_client = _get_tg_bind_redis()
+    if redis_client is not None:
+        try:
+            await redis_client.set(_tg_bind_redis_key(bind_code), json.dumps(code_info, ensure_ascii=False), ex=_tg_bind_ttl(code_info))
+            if code_info.get('type') == 'user' and code_info.get('uid'):
+                await redis_client.set(
+                    _tg_bind_user_index_key(int(code_info['uid'])),
+                    bind_code,
+                    ex=_tg_bind_ttl(code_info),
+                )
+        except Exception as exc:
+            logger.warning("写入 Redis 绑定码失败，回退内存存储：%s", exc)
+
+
+async def _get_bind_code_info(bind_code: str) -> Optional[dict[str, Any]]:
+    _cleanup_expired_codes()
+
+    code_info = _tg_bind_codes.get(bind_code)
+    if code_info:
+        return code_info
+
+    redis_client = _get_tg_bind_redis()
+    if redis_client is not None:
+        try:
+            raw = await redis_client.get(_tg_bind_redis_key(bind_code))
+            if raw:
+                parsed = json.loads(raw)
+                if isinstance(parsed, dict):
+                    _tg_bind_codes[bind_code] = parsed
+                    return parsed
+        except Exception as exc:
+            logger.warning("读取 Redis 绑定码失败，回退内存存储：%s", exc)
+    return None
+
+
+async def _delete_bind_code(bind_code: str) -> None:
+    code_info = _tg_bind_codes.pop(bind_code, None)
+
+    redis_client = _get_tg_bind_redis()
+    if redis_client is not None:
+        try:
+            if code_info is None:
+                code_info = await _get_bind_code_info(bind_code)
+                _tg_bind_codes.pop(bind_code, None)
+            await redis_client.delete(_tg_bind_redis_key(bind_code))
+            if code_info and code_info.get('type') == 'user' and code_info.get('uid'):
+                await redis_client.delete(_tg_bind_user_index_key(int(code_info['uid'])))
+        except Exception as exc:
+            logger.warning("删除 Redis 绑定码失败：%s", exc)
+
+
+async def _get_user_latest_bind_code(uid: int) -> Optional[str]:
+    _cleanup_expired_codes()
+
+    redis_client = _get_tg_bind_redis()
+    if redis_client is not None:
+        try:
+            code = await redis_client.get(_tg_bind_user_index_key(uid))
+            if code:
+                return code
+        except Exception as exc:
+            logger.warning("读取 Redis 用户绑定码索引失败：%s", exc)
+
+    for code, info in _tg_bind_codes.items():
+        if info.get('type') == 'user' and info.get('uid') == uid:
+            return code
+    return None
 
 
 def _detect_image_extension(header: bytes) -> str | None:
@@ -1031,10 +1137,9 @@ def _cleanup_expired_codes():
         _tg_bind_codes.pop(code, None)
 
 
-def _get_register_bind_telegram_id(bind_code: str) -> int | None:
+async def _get_register_bind_telegram_id(bind_code: str) -> int | None:
     """根据注册绑定码获取已确认的 Telegram ID"""
-    _cleanup_expired_codes()
-    code_info = _tg_bind_codes.get(bind_code)
+    code_info = await _get_bind_code_info(bind_code)
     if not code_info or code_info.get('type') != 'register':
         return None
     return code_info.get('confirmed_telegram_id')
@@ -1077,23 +1182,23 @@ async def generate_tg_bind_code():
     _cleanup_expired_codes()
     if len(_tg_bind_codes) >= _MAX_BIND_CODES:
         return api_response(False, "系统繁忙，请稍后重试", code=503)
-    
+
     # 撤销该用户之前未使用的绑定码
-    old_codes = [k for k, v in _tg_bind_codes.items() if v['uid'] == user.UID]
-    for k in old_codes:
-        del _tg_bind_codes[k]
+    old_code = await _get_user_latest_bind_code(user.UID)
+    if old_code:
+        await _delete_bind_code(old_code)
     
     # 生成新绑定码（确保不重复）
     code = _generate_bind_code()
-    while code in _tg_bind_codes:
+    while await _get_bind_code_info(code):
         code = _generate_bind_code()
-    
-    _tg_bind_codes[code] = {
+
+    await _set_bind_code_info(code, {
         'type': 'user',
         'uid': user.UID,
         'username': user.USERNAME,
         'created_at': _time.time(),
-    }
+    })
     
     return api_response(True, "绑定码已生成", {
         'bind_code': code,
@@ -1118,19 +1223,92 @@ async def generate_tg_register_bind_code():
 
     # 生成新绑定码（确保不重复）
     code = _generate_bind_code()
-    while code in _tg_bind_codes:
+    while await _get_bind_code_info(code):
         code = _generate_bind_code()
 
-    _tg_bind_codes[code] = {
+    await _set_bind_code_info(code, {
         'type': 'register',
         'created_at': _time.time(),
         'confirmed_telegram_id': None,
-    }
+    })
 
     return api_response(True, "绑定码已生成", {
         'bind_code': code,
         'expires_in': _BIND_CODE_EXPIRE,
     })
+
+
+async def confirm_tg_bind_internal(bind_code: str, telegram_id: int) -> tuple[bool, str, dict[str, Any], int]:
+    """供 Bot 与内部接口复用的 Telegram 绑定确认逻辑。"""
+    bind_code = (bind_code or '').strip().upper()
+    if not bind_code or not telegram_id:
+        return False, "参数缺失", {}, 400
+
+    try:
+        telegram_id = int(telegram_id)
+    except (TypeError, ValueError):
+        return False, "telegram_id 无效", {}, 400
+
+    code_info = await _get_bind_code_info(bind_code)
+    if not code_info:
+        return False, "绑定码无效或已过期", {}, 400
+
+    if code_info.get('type') == 'user':
+        uid = code_info['uid']
+
+        existing = await UserOperate.get_user_by_telegram_id(telegram_id)
+        if existing and existing.UID != uid:
+            return False, "该 Telegram 已绑定其他账号，一个 Telegram 只能绑定一个账号", {}, 400
+
+        user = await UserOperate.get_user_by_uid(uid)
+        if not user:
+            return False, "用户不存在", {}, 404
+
+        if user.TELEGRAM_ID:
+            await _delete_bind_code(bind_code)
+            return False, "该账号已绑定 Telegram", {}, 400
+
+        user.TELEGRAM_ID = telegram_id
+        await UserOperate.update_user(user)
+        await _delete_bind_code(bind_code)
+
+        logger.info(f"用户 {user.USERNAME} 通过 Bot 绑定 Telegram: {telegram_id}")
+
+        from src.core.utils import format_expire_time
+        from src.db.user import Role
+        role_map = {
+            Role.ADMIN.value: "管理员",
+            Role.WHITE_LIST.value: "白名单",
+            Role.NORMAL.value: "普通用户",
+        }
+
+        return True, "Telegram 绑定成功", {
+            'uid': uid,
+            'username': user.USERNAME,
+            'telegram_id': telegram_id,
+            'emby_id': user.EMBYID or None,
+            'role': role_map.get(user.ROLE, '未知'),
+            'active': user.ACTIVE_STATUS,
+            'expired_at': format_expire_time(user.EXPIRED_AT),
+        }, 200
+
+    if code_info.get('type') == 'register':
+        if code_info.get('confirmed_telegram_id') and code_info.get('confirmed_telegram_id') != telegram_id:
+            return False, "该绑定码已被其他 Telegram 账号使用", {}, 400
+
+        existing = await UserOperate.get_user_by_telegram_id(telegram_id)
+        if existing:
+            return False, "该 Telegram 已绑定其他账号，一个 Telegram 只能绑定一个账号", {}, 400
+
+        code_info['confirmed_telegram_id'] = telegram_id
+        await _set_bind_code_info(bind_code, code_info)
+
+        logger.info(f"注册绑定码 {bind_code} 已由 Telegram {telegram_id} 验证")
+        return True, "Telegram 绑定码验证成功", {
+            'telegram_id': telegram_id,
+        }, 200
+
+    return False, "绑定码类型无效", {}, 400
 
 
 @users_bp.route('/me/telegram/bind-confirm', methods=['POST'])
@@ -1149,83 +1327,14 @@ async def confirm_tg_bind():
     bind_code = data.get('bind_code', '').strip().upper()
     telegram_id = data.get('telegram_id')
     bot_secret = data.get('bot_secret', '')
-    
-    # 验证 Bot 身份
+
     from src.config import SecurityConfig
     expected_secret = (SecurityConfig.BOT_INTERNAL_SECRET or '').strip()
     if not bot_secret or not expected_secret or not hmac.compare_digest(str(bot_secret), str(expected_secret)):
         return api_response(False, "未授权", code=403)
-    
-    if not bind_code or not telegram_id:
-        return api_response(False, "参数缺失", code=400)
-    
-    # 清理过期绑定码
-    _cleanup_expired_codes()
-    
-    code_info = _tg_bind_codes.get(bind_code)
-    if not code_info:
-        return api_response(False, "绑定码无效或已过期", code=400)
 
-    if code_info.get('type') == 'user':
-        uid = code_info['uid']
-
-        # 检查该 Telegram ID 是否已被其他用户绑定
-        existing = await UserOperate.get_user_by_telegram_id(telegram_id)
-        if existing and existing.UID != uid:
-            return api_response(False, "该 Telegram 已绑定其他账号，一个 Telegram 只能绑定一个账号", code=400)
-
-        # 绑定
-        user = await UserOperate.get_user_by_uid(uid)
-        if not user:
-            return api_response(False, "用户不存在", code=404)
-
-        if user.TELEGRAM_ID:
-            del _tg_bind_codes[bind_code]
-            return api_response(False, "该账号已绑定 Telegram", code=400)
-
-        user.TELEGRAM_ID = telegram_id
-        await UserOperate.update_user(user)
-
-        # 删除已使用的绑定码
-        del _tg_bind_codes[bind_code]
-    elif code_info.get('type') == 'register':
-        # 注册绑定码确认：只记录 Telegram ID，不直接绑定到用户
-        if code_info.get('confirmed_telegram_id') and code_info.get('confirmed_telegram_id') != telegram_id:
-            return api_response(False, "该绑定码已被其他 Telegram 账号使用", code=400)
-
-        existing = await UserOperate.get_user_by_telegram_id(telegram_id)
-        if existing:
-            return api_response(False, "该 Telegram 已绑定其他账号，一个 Telegram 只能绑定一个账号", code=400)
-
-        code_info['confirmed_telegram_id'] = telegram_id
-        _tg_bind_codes[bind_code] = code_info
-
-        logger.info(f"注册绑定码 {bind_code} 已由 Telegram {telegram_id} 验证")
-        return api_response(True, "Telegram 绑定码验证成功", {
-            'telegram_id': telegram_id,
-        })
-    else:
-        return api_response(False, "绑定码类型无效", code=400)
-
-    logger.info(f"用户 {user.USERNAME} 通过 Bot 绑定 Telegram: {telegram_id}")
-    
-    from src.core.utils import format_expire_time
-    from src.db.user import Role
-    role_map = {
-        Role.ADMIN.value: "管理员",
-        Role.WHITE_LIST.value: "白名单",
-        Role.NORMAL.value: "普通用户",
-    }
-    
-    return api_response(True, "Telegram 绑定成功", {
-        'uid': uid,
-        'username': user.USERNAME,
-        'telegram_id': telegram_id,
-        'emby_id': user.EMBYID or None,
-        'role': role_map.get(user.ROLE, '未知'),
-        'active': user.ACTIVE_STATUS,
-        'expired_at': format_expire_time(user.EXPIRED_AT),
-    })
+    ok, message, payload, status_code = await confirm_tg_bind_internal(bind_code, telegram_id)
+    return api_response(ok, message, payload, code=status_code)
 
 # ==================== 用户设置 ====================
 

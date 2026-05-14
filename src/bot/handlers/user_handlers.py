@@ -314,38 +314,17 @@ def register(bot):
             await update.message.reply_text(
                 "❌ 请提供绑定码\n\n"
                 "用法: `/bind <绑定码>`\n\n"
-                "请先在网页端「个人设置」中获取 6 位绑定码。",
+                "请先在网页端获取 8 位绑定码。",
                 parse_mode="Markdown",
             )
             return
 
-        bind_code = context.args[0].strip()
-
-        import requests
-        from src.config import SecurityConfig, APIConfig
-        bot_secret = (SecurityConfig.BOT_INTERNAL_SECRET or '').strip()
-        if not bot_secret:
-            await update.message.reply_text("❌ Bot 内部密钥未配置，请联系管理员检查 Security.bot_internal_secret")
-            logger.error("TG 绑定失败: 未配置 Security.bot_internal_secret")
-            return
-
-        port = getattr(APIConfig, 'PORT', 5000)
-        api_url = f"http://127.0.0.1:{port}/api/v1/users/me/telegram/bind-confirm"
+        bind_code = context.args[0].strip().upper()
+        from src.api.v1.users import confirm_tg_bind_internal
 
         try:
-            resp = await asyncio.to_thread(
-                requests.post,
-                api_url,
-                json={
-                    'bind_code': bind_code,
-                    'telegram_id': telegram_id,
-                    'bot_secret': bot_secret,
-                },
-                timeout=10,
-            )
-            result = resp.json()
-            if result.get('success'):
-                d = result.get('data', {})
+            ok, message, d, _ = await confirm_tg_bind_internal(bind_code, telegram_id)
+            if ok:
                 info_lines = [
                     "✅ **绑定成功！**\n",
                     f"👤 **用户名**: `{d.get('username', '')}`",
@@ -357,7 +336,7 @@ def register(bot):
                 ]
                 await update.message.reply_text("\n".join(info_lines), parse_mode="Markdown")
             else:
-                await update.message.reply_text(f"❌ 绑定失败: {result.get('message', '未知错误')}")
+                await update.message.reply_text(f"❌ 绑定失败: {message or '未知错误'}")
         except Exception as e:
             logger.error(f"TG 绑定回调失败: {e}")
             await update.message.reply_text("❌ 绑定失败，请稍后重试或联系管理员")
