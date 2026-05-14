@@ -6,6 +6,8 @@ Telegram Bot 核心模块
 """
 import asyncio
 import logging
+import os
+from pathlib import Path
 from typing import Optional, List, Union
 
 from telegram import Bot, Update, InlineKeyboardMarkup, InlineKeyboardButton
@@ -19,6 +21,107 @@ logger = logging.getLogger(__name__)
 
 # 全局 Bot 实例
 _bot_instance: Optional['TelegramBot'] = None
+_bot_lock_fd: Optional[int] = None
+_bot_lock_path: Optional[Path] = None
+
+
+def _resolve_bot_lock_path() -> Path:
+    """解析 Bot 单实例锁文件路径。"""
+    db_dir = getattr(Config, "DATABASES_DIR", None)
+    if db_dir:
+        return Path(db_dir) / "telegram_bot.lock"
+    return Path.cwd() / "db" / "telegram_bot.lock"
+
+
+def _is_pid_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True
+
+
+def _acquire_bot_lock() -> bool:
+    """获取 Bot 单实例锁，防止多个进程同时轮询同一 Token。"""
+    global _bot_lock_fd, _bot_lock_path
+
+    if _bot_lock_fd is not None:
+        return True
+
+    lock_path = _resolve_bot_lock_path()
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if lock_path.exists():
+        existing_pid = 0
+        try:
+            existing_pid = int((lock_path.read_text(encoding="utf-8") or "0").strip())
+        except Exception:
+            existing_pid = 0
+
+        if existing_pid and _is_pid_alive(existing_pid):
+            logger.error("检测到已有 Bot 实例运行 (PID=%s)，跳过启动", existing_pid)
+            return False
+
+        # 清理失效的陈旧锁
+        try:
+            lock_path.unlink()
+        except Exception:
+            pass
+
+    try:
+        fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        logger.error("Bot 锁文件已存在，可能有其他实例在运行：%s", lock_path)
+        return False
+    except Exception as exc:
+        logger.error("创建 Bot 锁文件失败: %s", exc)
+        return False
+
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", closefd=False) as f:
+            f.write(str(os.getpid()))
+            f.flush()
+    except Exception:
+        try:
+            os.close(fd)
+        except Exception:
+            pass
+        try:
+            lock_path.unlink()
+        except Exception:
+            pass
+        logger.exception("写入 Bot 锁文件失败")
+        return False
+
+    _bot_lock_fd = fd
+    _bot_lock_path = lock_path
+    return True
+
+
+def _release_bot_lock() -> None:
+    """释放 Bot 单实例锁。"""
+    global _bot_lock_fd, _bot_lock_path
+
+    if _bot_lock_fd is not None:
+        try:
+            os.close(_bot_lock_fd)
+        except Exception:
+            pass
+        _bot_lock_fd = None
+
+    if _bot_lock_path is not None:
+        try:
+            if _bot_lock_path.exists():
+                _bot_lock_path.unlink()
+        except Exception:
+            pass
+        _bot_lock_path = None
 
 
 class TelegramBot:
@@ -294,6 +397,9 @@ async def start_bot() -> Optional[TelegramBot]:
     if _bot_instance is not None:
         logger.warning("Bot 已在运行")
         return _bot_instance
+
+    if not _acquire_bot_lock():
+        return None
     
     try:
         _bot_instance = TelegramBot()
@@ -301,6 +407,7 @@ async def start_bot() -> Optional[TelegramBot]:
         return _bot_instance
     except Exception as e:
         logger.error(f"启动 Bot 失败: {e}")
+        _release_bot_lock()
         return None
 
 
@@ -311,4 +418,6 @@ async def stop_bot():
     if _bot_instance is not None:
         await _bot_instance.stop()
         _bot_instance = None
+
+    _release_bot_lock()
 
