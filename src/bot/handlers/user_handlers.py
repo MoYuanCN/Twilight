@@ -8,9 +8,10 @@
 """
 import asyncio
 import logging
+import time
 
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
-from telegram.ext import ContextTypes, CommandHandler, CallbackQueryHandler
+from telegram.ext import ContextTypes, CommandHandler, CallbackQueryHandler, MessageHandler, filters
 
 from src.bot.handlers.common import (
     require_registered, require_subscribe, require_private, require_panel,
@@ -24,6 +25,34 @@ from src.config import Config
 
 logger = logging.getLogger(__name__)
 
+_bind_states = {}
+_BIND_STATE_TTL = 10 * 60
+
+
+def _set_bind_state(uid: int, state: dict):
+    payload = dict(state)
+    payload['_ts'] = int(time.time())
+    _bind_states[uid] = payload
+
+
+def _get_bind_state(uid: int):
+    state = _bind_states.get(uid)
+    if not state:
+        return None
+
+    ts = int(state.get('_ts', 0))
+    if ts <= 0 or int(time.time()) - ts > _BIND_STATE_TTL:
+        _bind_states.pop(uid, None)
+        return None
+
+    payload = dict(state)
+    payload.pop('_ts', None)
+    return payload
+
+
+def _clear_bind_state(uid: int) -> bool:
+    return _bind_states.pop(uid, None) is not None
+
 
 def register(bot):
     """注册处理器"""
@@ -34,7 +63,7 @@ def register(bot):
             "📚 **命令导航**\n",
             "**👤 常用功能**",
             "• /start - 打开主菜单",
-            "• /bind <绑定码> - 绑定 Telegram",
+            "• /bind - 开始绑定 Telegram",
             "• /me - 查看个人信息",
             "• /help - 查看帮助",
         ]
@@ -108,7 +137,7 @@ def register(bot):
                 "可用命令：\n"
                 "• /start \\- 打开主菜单\n"
                 "• /help \\- 帮助信息\n"
-                "• /bind <绑定码> \\- 绑定 Telegram\n"
+                "• /bind \\- 开始绑定 Telegram\n"
                 "• /me \\- 查看个人信息"
             )
             await update.message.reply_text(text, parse_mode="Markdown")
@@ -242,8 +271,8 @@ def register(bot):
             text = (
                 f"📱 **Telegram 绑定信息**\n\n"
                 f"❌ 未绑定\n\n"
-                f"发送 `/bind <绑定码>` 进行绑定\n"
-                f"（绑定码请在网页端获取）"
+                f"发送 `/bind` 后按提示输入绑定码\n"
+                f"（可发送 /cancel 取消）"
             )
             buttons = [[InlineKeyboardButton("🔙 返回", callback_data="panel_user")]]
 
@@ -261,7 +290,7 @@ def register(bot):
         user.TELEGRAM_ID = None
         await UserOperate.update_user(user)
         logger.info(f"用户 {user.USERNAME} 解绑 Telegram")
-        text = "✅ 已解绑 Telegram\n\n重新绑定请使用 /bind <绑定码>"
+        text = "✅ 已解绑 Telegram\n\n重新绑定请发送 /bind"
         kb = InlineKeyboardMarkup([[back_button()]])
         await safe_edit_message(query.message, text, reply_markup=kb)
 
@@ -294,6 +323,51 @@ def register(bot):
 
     # ======================== 绑定命令（始终可用） ========================
 
+    async def _confirm_bind_and_reply(update: Update, telegram_id: int, bind_code: str) -> bool:
+        from src.api.v1.users import confirm_tg_bind_internal
+
+        ok, message, d, _ = await confirm_tg_bind_internal(bind_code, telegram_id)
+        if ok:
+            info_lines = [
+                "✅ **绑定成功！**\n",
+                f"👤 **用户名**: `{d.get('username', '')}`",
+                f"👑 **角色**: {d.get('role', '未知')}",
+                f"📊 **状态**: {'✅ 活跃' if d.get('active') else '❌ 禁用'}",
+                f"⏰ **到期**: {d.get('expired_at', '未知')}",
+                f"🎬 **Emby**: {'已绑定' if d.get('emby_id') else '未绑定'}",
+                "\n💡 发送 /start 打开主菜单",
+            ]
+            await update.message.reply_text("\n".join(info_lines), parse_mode="Markdown")
+            return True
+
+        await update.message.reply_text(
+            f"❌ 绑定失败: {message or '未知错误'}\n\n请重新发送 8 位绑定码，或发送 /cancel 取消"
+        )
+        return False
+
+    @require_private
+    async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """取消用户输入流程（包含绑定流程和管理员输入流程）"""
+        uid = update.effective_user.id if update.effective_user else 0
+        if not uid:
+            return
+
+        cancelled = []
+        if _clear_bind_state(uid):
+            cancelled.append("绑定流程")
+
+        try:
+            from src.bot.handlers.admin_handlers import _clear_admin_state  # type: ignore
+            if _clear_admin_state(uid):
+                cancelled.append("管理员输入流程")
+        except Exception:
+            pass
+
+        if cancelled:
+            await update.message.reply_text(f"✅ 已取消: {'、'.join(cancelled)}")
+        else:
+            await update.message.reply_text("ℹ️ 当前没有进行中的输入流程")
+
     @require_private
     async def cmd_bind(update: Update, context: ContextTypes.DEFAULT_TYPE):
         """通过绑定码绑定 Telegram"""
@@ -311,35 +385,76 @@ def register(bot):
             return
 
         if not context.args or len(context.args) < 1:
+            _set_bind_state(telegram_id, {'action': 'bind_wait_code'})
             await update.message.reply_text(
-                "❌ 请提供绑定码\n\n"
-                "用法: `/bind <绑定码>`\n\n"
-                "请先在网页端获取 8 位绑定码。",
+                "📨 请输入 8 位绑定码以完成绑定\n\n"
+                "💡 获取方式: 网页端个人中心/注册页\n"
+                "💡 取消流程: /cancel",
                 parse_mode="Markdown",
             )
             return
 
         bind_code = context.args[0].strip().upper()
-        from src.api.v1.users import confirm_tg_bind_internal
+        if len(bind_code) != 8 or not bind_code.isalnum():
+            _set_bind_state(telegram_id, {'action': 'bind_wait_code'})
+            await update.message.reply_text("❌ 绑定码格式不正确，请发送 8 位字母数字绑定码，或发送 /cancel 取消")
+            return
 
         try:
-            ok, message, d, _ = await confirm_tg_bind_internal(bind_code, telegram_id)
-            if ok:
-                info_lines = [
-                    "✅ **绑定成功！**\n",
-                    f"👤 **用户名**: `{d.get('username', '')}`",
-                    f"👑 **角色**: {d.get('role', '未知')}",
-                    f"📊 **状态**: {'✅ 活跃' if d.get('active') else '❌ 禁用'}",
-                    f"⏰ **到期**: {d.get('expired_at', '未知')}",
-                    f"🎬 **Emby**: {'已绑定' if d.get('emby_id') else '未绑定'}",
-                    "\n💡 发送 /start 打开主菜单",
-                ]
-                await update.message.reply_text("\n".join(info_lines), parse_mode="Markdown")
+            if await _confirm_bind_and_reply(update, telegram_id, bind_code):
+                _clear_bind_state(telegram_id)
             else:
-                await update.message.reply_text(f"❌ 绑定失败: {message or '未知错误'}")
+                _set_bind_state(telegram_id, {'action': 'bind_wait_code'})
         except Exception as e:
             logger.error(f"TG 绑定回调失败: {e}")
-            await update.message.reply_text("❌ 绑定失败，请稍后重试或联系管理员")
+            _set_bind_state(telegram_id, {'action': 'bind_wait_code'})
+            await update.message.reply_text("❌ 绑定失败，请稍后重试或联系管理员。你也可以重新发送绑定码，或发送 /cancel 取消")
+
+    @require_private
+    async def handle_bind_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """处理绑定流程中的文本输入（/bind 后发送绑定码）。"""
+        if not update.effective_user or not update.message:
+            return
+
+        telegram_id = update.effective_user.id
+        state = _get_bind_state(telegram_id)
+        if not state or state.get('action') != 'bind_wait_code':
+            return
+
+        text = (update.message.text or '').strip()
+        if not text:
+            return
+
+        if text.lower() in {'/cancel', 'cancel', '取消', '返回'}:
+            _clear_bind_state(telegram_id)
+            await update.message.reply_text("✅ 已取消绑定流程")
+            return
+
+        existing = await UserOperate.get_user_by_telegram_id(telegram_id)
+        if existing:
+            _clear_bind_state(telegram_id)
+            await update.message.reply_text(
+                f"⚠️ 您已绑定账号: `{existing.USERNAME}`\n"
+                "如需更换，请在网页端操作",
+                parse_mode="Markdown",
+            )
+            return
+
+        bind_code = text.upper()
+        if bind_code.startswith('/BIND'):
+            parts = bind_code.split()
+            bind_code = parts[1].strip().upper() if len(parts) > 1 else ''
+
+        if len(bind_code) != 8 or not bind_code.isalnum():
+            await update.message.reply_text("❌ 绑定码格式不正确，请发送 8 位字母数字绑定码，或发送 /cancel 取消")
+            return
+
+        try:
+            if await _confirm_bind_and_reply(update, telegram_id, bind_code):
+                _clear_bind_state(telegram_id)
+        except Exception as e:
+            logger.error(f"TG 绑定处理失败: {e}")
+            await update.message.reply_text("❌ 绑定失败，请稍后重试或联系管理员。你也可以重新发送绑定码，或发送 /cancel 取消")
 
     # ======================== 注册处理器 ========================
 
@@ -347,6 +462,7 @@ def register(bot):
     app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CommandHandler("me", cmd_me))
     app.add_handler(CommandHandler("bind", cmd_bind))
+    app.add_handler(CommandHandler("cancel", cmd_cancel))
 
     # 主菜单 & 导航
     app.add_handler(CallbackQueryHandler(cb_back_start, pattern="^back_start$"))
@@ -358,4 +474,7 @@ def register(bot):
     app.add_handler(CallbackQueryHandler(cb_user_tg_info, pattern="^user_tg_info$"))
     app.add_handler(CallbackQueryHandler(cb_user_unbindtg_confirm, pattern="^user_unbindtg_confirm$"))
     app.add_handler(CallbackQueryHandler(cb_user_playinfo, pattern="^user_playinfo$"))
+
+    # 文本消息（bind 状态机）- 在 admin 文本处理之后执行
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE, handle_bind_text), group=2)
 

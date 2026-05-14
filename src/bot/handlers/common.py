@@ -156,7 +156,7 @@ def require_registered(func: Callable) -> Callable:
         if not user:
             msg = (
                 "⚠️ 您尚未绑定账号\n\n"
-                "请使用 /bind <绑定码> 绑定您的账号\n"
+                "请先发送 /bind，再按提示发送绑定码\n"
                 "请先在网页端完成注册后再绑定"
             )
             if update.callback_query:
