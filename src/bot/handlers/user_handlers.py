@@ -393,8 +393,8 @@ def register(bot):
             await update.message.reply_text(
                 "❌ 绑定失败: 绑定码无效或已过期\n\n"
                 "请确认刚刚生成的是最新 8 位绑定码后重试。\n"
-                "若后端使用多 worker（如 uvicorn --workers 4），请配置 Redis 共享存储，"
-                "或临时改为单 worker 再绑定。\n\n"
+                "若你刚刚完成 /bind，请等待 1-2 秒后再提交一次，"
+                "仍失败请重新生成绑定码。\n\n"
                 "你可以重新发送绑定码，或发送 /cancel 取消。"
             )
         else:

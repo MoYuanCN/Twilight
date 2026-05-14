@@ -202,7 +202,7 @@ function Run-Prod-Server {
     }
     
     Write-Host "🚀 启动生产服务器..." -ForegroundColor Cyan
-    & $PYTHON -m uvicorn asgi:app --host 0.0.0.0 --port 5000 --workers 1
+    & $PYTHON -m uvicorn asgi:app --host 0.0.0.0 --port 5000 --workers 4
 }
 
 function Complete-Setup {

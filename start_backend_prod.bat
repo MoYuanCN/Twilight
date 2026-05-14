@@ -18,7 +18,7 @@ if exist ".venv\Scripts\python.exe" (
 if "%TWILIGHT_WITH_BOT%"=="" set "TWILIGHT_WITH_BOT=1"
 if "%TWILIGHT_FORCE_RESTART_BOT%"=="" set "TWILIGHT_FORCE_RESTART_BOT=0"
 if "%TWILIGHT_BOT_LOCK_FILE%"=="" set "TWILIGHT_BOT_LOCK_FILE=%~dp0db\telegram_bot.lock"
-if "%TWILIGHT_UVICORN_WORKERS%"=="" set "TWILIGHT_UVICORN_WORKERS=1"
+if "%TWILIGHT_UVICORN_WORKERS%"=="" set "TWILIGHT_UVICORN_WORKERS=4"
 
 echo Using Python: %PYTHON%
 echo Mode: production (uvicorn)

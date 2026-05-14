@@ -4,7 +4,7 @@ import time
 import hashlib
 from typing import Optional
 
-from sqlalchemy import select, update, func, String, Integer, Boolean
+from sqlalchemy import select, update, delete, func, String, Integer, Boolean
 from sqlalchemy.ext.asyncio import AsyncAttrs
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -58,6 +58,165 @@ class TelegramRebindRequestModel(UsersDatabaseModel):
     CREATED_AT: Mapped[int] = mapped_column(Integer, default=lambda: int(time.time()), nullable=False)
     UPDATED_AT: Mapped[int] = mapped_column(Integer, default=lambda: int(time.time()), nullable=False)
     REVIEWED_AT: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+
+class TelegramBindCodeModel(UsersDatabaseModel):
+    __tablename__ = 'telegram_bind_codes'
+
+    CODE: Mapped[str] = mapped_column(String(16), primary_key=True)
+    SCENE: Mapped[str] = mapped_column(String(16), index=True, nullable=False)  # register | user
+    UID: Mapped[Optional[int]] = mapped_column(Integer, index=True, nullable=True)
+    USERNAME: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    CONFIRMED_TELEGRAM_ID: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    CREATED_AT: Mapped[int] = mapped_column(Integer, default=lambda: int(time.time()), nullable=False)
+    EXPIRES_AT: Mapped[int] = mapped_column(Integer, index=True, nullable=False)
+
+
+class TelegramBindCodeOperate:
+    @staticmethod
+    async def upsert_code(
+        code: str,
+        scene: str,
+        uid: Optional[int] = None,
+        username: Optional[str] = None,
+        confirmed_telegram_id: Optional[int] = None,
+        created_at: Optional[int] = None,
+        expires_at: Optional[int] = None,
+    ) -> TelegramBindCodeModel:
+        now = int(time.time())
+        created_at = created_at or now
+        expires_at = expires_at or (created_at + 300)
+
+        async with UsersSessionFactory() as session:
+            async with session.begin():
+                existing = await session.get(TelegramBindCodeModel, code)
+                if existing:
+                    existing.SCENE = scene
+                    existing.UID = uid
+                    existing.USERNAME = username
+                    existing.CONFIRMED_TELEGRAM_ID = confirmed_telegram_id
+                    existing.CREATED_AT = created_at
+                    existing.EXPIRES_AT = expires_at
+                    await session.flush()
+                    return existing
+
+                item = TelegramBindCodeModel(
+                    CODE=code,
+                    SCENE=scene,
+                    UID=uid,
+                    USERNAME=username,
+                    CONFIRMED_TELEGRAM_ID=confirmed_telegram_id,
+                    CREATED_AT=created_at,
+                    EXPIRES_AT=expires_at,
+                )
+                session.add(item)
+                await session.flush()
+                return item
+
+    @staticmethod
+    async def get_code(code: str) -> Optional[TelegramBindCodeModel]:
+        now = int(time.time())
+        async with UsersSessionFactory() as session:
+            scalar = await session.execute(
+                select(TelegramBindCodeModel)
+                .where(
+                    TelegramBindCodeModel.CODE == code,
+                    TelegramBindCodeModel.EXPIRES_AT > now,
+                )
+                .limit(1)
+            )
+            return scalar.scalar_one_or_none()
+
+    @staticmethod
+    async def delete_code(code: str) -> None:
+        async with UsersSessionFactory() as session:
+            async with session.begin():
+                await session.execute(
+                    delete(TelegramBindCodeModel)
+                    .where(TelegramBindCodeModel.CODE == code)
+                )
+
+    @staticmethod
+    async def delete_user_codes(uid: int) -> None:
+        async with UsersSessionFactory() as session:
+            async with session.begin():
+                await session.execute(
+                    delete(TelegramBindCodeModel)
+                    .where(
+                        TelegramBindCodeModel.UID == uid,
+                        TelegramBindCodeModel.SCENE == 'user',
+                    )
+                )
+
+    @staticmethod
+    async def get_latest_user_code(uid: int) -> Optional[str]:
+        now = int(time.time())
+        async with UsersSessionFactory() as session:
+            scalar = await session.execute(
+                select(TelegramBindCodeModel.CODE)
+                .where(
+                    TelegramBindCodeModel.UID == uid,
+                    TelegramBindCodeModel.SCENE == 'user',
+                    TelegramBindCodeModel.EXPIRES_AT > now,
+                )
+                .order_by(TelegramBindCodeModel.CREATED_AT.desc())
+                .limit(1)
+            )
+            return scalar.scalar_one_or_none()
+
+    @staticmethod
+    async def cleanup_expired() -> None:
+        now = int(time.time())
+        async with UsersSessionFactory() as session:
+            async with session.begin():
+                await session.execute(
+                    delete(TelegramBindCodeModel)
+                    .where(TelegramBindCodeModel.EXPIRES_AT <= now)
+                )
+
+    @staticmethod
+    async def count_active() -> int:
+        now = int(time.time())
+        async with UsersSessionFactory() as session:
+            scalar = await session.execute(
+                select(func.count())
+                .select_from(TelegramBindCodeModel)
+                .where(TelegramBindCodeModel.EXPIRES_AT > now)
+            )
+            return int(scalar.scalar_one() or 0)
+
+    @staticmethod
+    async def trim_to_max(max_codes: int) -> None:
+        if max_codes <= 0:
+            return
+
+        now = int(time.time())
+        async with UsersSessionFactory() as session:
+            async with session.begin():
+                scalar = await session.execute(
+                    select(func.count())
+                    .select_from(TelegramBindCodeModel)
+                    .where(TelegramBindCodeModel.EXPIRES_AT > now)
+                )
+                total = int(scalar.scalar_one() or 0)
+                overflow = total - max_codes
+                if overflow <= 0:
+                    return
+
+                rows = await session.execute(
+                    select(TelegramBindCodeModel.CODE)
+                    .where(TelegramBindCodeModel.EXPIRES_AT > now)
+                    .order_by(TelegramBindCodeModel.CREATED_AT.asc())
+                    .limit(overflow)
+                )
+                codes = [row[0] for row in rows.all()]
+                if not codes:
+                    return
+
+                await session.execute(
+                    delete(TelegramBindCodeModel)
+                    .where(TelegramBindCodeModel.CODE.in_(codes))
+                )
 
 
 class TelegramRebindRequestOperate:
