@@ -427,25 +427,46 @@ async def set_user_nsfw_permission(uid: int):
     
     data = request.get_json() or {}
     grant = data.get('grant', True)
-    
+
     try:
+        import json as _json
+
         # 更新数据库中的权限状态
         user.NSFW_ALLOWED = grant
-        if not grant:
-            # 如果取消权限，强制关闭显示状态
+
+        # 同步偏好集合：
+        # - 授予：默认开放所有 NSFW 库（用户可在前端再细化）
+        # - 撤销：清空偏好并关闭 NSFW 总开关
+        nsfw_names = list((await EmbyService.find_nsfw_library_ids()).keys())
+
+        other_data: dict = {}
+        if user.OTHER:
+            try:
+                other_data = _json.loads(user.OTHER)
+                if not isinstance(other_data, dict):
+                    other_data = {}
+            except (ValueError, TypeError):
+                other_data = {}
+
+        if grant:
+            other_data['nsfw_libraries'] = sorted(nsfw_names)
+            user.NSFW = bool(nsfw_names)
+        else:
+            other_data['nsfw_libraries'] = []
             user.NSFW = False
-            
+
+        user.OTHER = _json.dumps(other_data)
         await UserOperate.update_user(user)
-        
-        # 同步到 Emby
+
+        # 通过统一的三步重建流程同步到 Emby
         success, message = await UserService.sync_user_to_emby(user)
-        
+
         if success:
             status_msg = "已授予" if grant else "已撤销"
             return api_response(True, f"{status_msg} NSFW 库访问权限")
         else:
             return api_response(False, f"同步到 Emby 失败: {message}", code=500)
-            
+
     except Exception as e:
         import logging
         logger = logging.getLogger(__name__)

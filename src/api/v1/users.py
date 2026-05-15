@@ -6,6 +6,7 @@
 import json
 import hmac
 import logging
+import re
 from urllib.parse import urlparse
 from typing import Any
 import time as _time
@@ -1288,14 +1289,54 @@ async def get_my_settings():
 
 # ==================== 背景管理 ====================
 
+_CSS_URL_RE = re.compile(r'^\s*url\(\s*([\'"]?)([^\'")]+)\1\s*\)\s*$', re.IGNORECASE)
+_CSS_BG_FUNC_RE = re.compile(
+    r'^\s*(linear-gradient|radial-gradient|conic-gradient|repeating-linear-gradient|'
+    r'repeating-radial-gradient|repeating-conic-gradient|image-set|cross-fade|'
+    r'paint|element)\s*\(',
+    re.IGNORECASE,
+)
+
+
 def _is_valid_background_url(value: str) -> bool:
-    """仅允许 http(s) 或站内相对路径。"""
+    """允许:
+    - 空字符串
+    - 站内相对路径 ("/uploads/...")
+    - 裸 http(s):// URL
+    - CSS url("...") 包装（内部 URL 同样需通过校验）
+    - linear-gradient / radial-gradient 等 CSS 背景函数
+    """
     if not value:
         return True
-    if value.startswith('/'):
+    stripped = value.strip()
+    if not stripped:
         return True
+
+    # 站内相对路径
+    if stripped.startswith('/'):
+        return True
+
+    # CSS url("...") 包装：解析内部 URL 后递归校验
+    url_match = _CSS_URL_RE.match(stripped)
+    if url_match:
+        inner = url_match.group(2).strip()
+        if not inner:
+            return False
+        if inner.startswith('/'):
+            return True
+        try:
+            parsed = urlparse(inner)
+        except Exception:
+            return False
+        return parsed.scheme in ('http', 'https') and bool(parsed.netloc)
+
+    # gradient / image-set 等 CSS 函数：直接放行（仅做长度限制）
+    if _CSS_BG_FUNC_RE.match(stripped):
+        return True
+
+    # 裸 http(s):// URL
     try:
-        parsed = urlparse(value)
+        parsed = urlparse(stripped)
     except Exception:
         return False
     return parsed.scheme in ('http', 'https') and bool(parsed.netloc)
@@ -1372,7 +1413,11 @@ async def update_user_background():
     if len(light_bg_image) > MAX_BG_LENGTH or len(dark_bg_image) > MAX_BG_LENGTH:
         return api_response(False, f"背景图片URL过长", code=400)
     if not _is_valid_background_url(light_bg_image) or not _is_valid_background_url(dark_bg_image):
-        return api_response(False, "背景图片 URL 格式不合法，仅支持 http(s) 或站内相对路径", code=400)
+        return api_response(
+            False,
+            "背景图片格式不合法，支持站内相对路径、http(s) URL、CSS url(...) 包装或 linear-gradient 等背景函数",
+            code=400,
+        )
     
     # 保存到 OTHER 字段
     try:

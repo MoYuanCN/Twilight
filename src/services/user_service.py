@@ -879,7 +879,8 @@ class UserService:
     @staticmethod
     async def toggle_nsfw(user: UserModel, enable: bool, library_names: List[str] = None) -> Tuple[bool, str]:
         """
-        切换 NSFW 库显示状态并同步到 Emby
+        切换 NSFW 库显示状态：先更新 DB 偏好集合，再通过 sync_user_to_emby 触发
+        统一的「三步重建」策略同步到 Emby。
 
         :param user: 用户对象
         :param enable: 开启/关闭
@@ -893,71 +894,51 @@ class UserService:
 
         from src.services.emby_service import EmbyService
 
-        # 查找所有 NSFW 库 {名称: ID}
         nsfw_map = await EmbyService.find_nsfw_library_ids()
         if not nsfw_map:
             return False, "系统未配置 NSFW 媒体库"
 
-        # 如果指定了库名称，过滤出目标库（大小写不敏感匹配配置名称）
+        # 解析目标库（大小写不敏感）；为空时操作所有 NSFW 库
         if library_names:
             wanted = {n.strip().lower() for n in library_names if (n or '').strip()}
-            target_map = {k: v for k, v in nsfw_map.items() if k.strip().lower() in wanted}
-            if not target_map:
+            target_names = {k for k in nsfw_map.keys() if k.strip().lower() in wanted}
+            if not target_names:
                 return False, "指定的 NSFW 媒体库不存在"
         else:
-            target_map = nsfw_map
+            target_names = set(nsfw_map.keys())
 
-        try:
-            emby = get_emby_client()
+        # 读取用户偏好，更新后写回
+        other_data: dict = {}
+        if user.OTHER:
+            try:
+                other_data = json.loads(user.OTHER)
+                if not isinstance(other_data, dict):
+                    other_data = {}
+            except (json.JSONDecodeError, TypeError):
+                other_data = {}
 
-            if enable:
-                success = await emby.update_nsfw_access(
-                    user.EMBYID,
-                    grant_library_ids=list(target_map.values()),
-                    grant_library_names=list(target_map.keys()),
-                )
-            else:
-                success = await emby.update_nsfw_access(
-                    user.EMBYID,
-                    revoke_library_ids=list(target_map.values()),
-                    revoke_library_names=list(target_map.keys()),
-                )
+        prev_enabled = set(other_data.get('nsfw_libraries') or [])
 
-            if not success:
-                return False, "更新 Emby NSFW 库权限失败"
+        if enable:
+            enabled_nsfw = prev_enabled | target_names
+        else:
+            enabled_nsfw = prev_enabled - target_names
+        # 仅保留仍在配置中的 NSFW 库
+        enabled_nsfw &= set(nsfw_map.keys())
 
-            # 读取用户的 NSFW 偏好，按 Emby 实际返回的策略重建偏好集合
-            import json
-            other_data = {}
-            if user.OTHER:
-                try:
-                    other_data = json.loads(user.OTHER)
-                except (json.JSONDecodeError, TypeError):
-                    pass
+        other_data['nsfw_libraries'] = sorted(enabled_nsfw)
+        user.OTHER = json.dumps(other_data)
+        user.NSFW = len(enabled_nsfw) > 0
+        await UserOperate.update_user(user)
 
-            prev_enabled = set(other_data.get('nsfw_libraries', []) or [])
-            target_names = set(target_map.keys())
+        # 由 sync_user_to_emby 统一调用 apply_library_policy 落地
+        ok, msg = await UserService.sync_user_to_emby(user)
+        if not ok:
+            return False, f"更新 Emby NSFW 库权限失败: {msg}"
 
-            if enable:
-                enabled_nsfw = prev_enabled | target_names
-            else:
-                enabled_nsfw = prev_enabled - target_names
-            # 仅保留仍在配置中的 NSFW 库名称
-            enabled_nsfw &= set(nsfw_map.keys())
-
-            other_data['nsfw_libraries'] = sorted(enabled_nsfw)
-            user.OTHER = json.dumps(other_data)
-
-            # NSFW 全局标志：有任何 NSFW 库开启即为 True
-            user.NSFW = len(enabled_nsfw) > 0
-            await UserOperate.update_user(user)
-
-            status = "开启" if enable else "关闭"
-            lib_str = ", ".join(target_map.keys())
-            return True, f"NSFW 库 [{lib_str}] 已{status}，已同步到 Emby"
-        except Exception as e:
-            logger.error(f"切换 NSFW 显示状态失败: {e}", exc_info=True)
-            return False, f"操作失败: {e}"
+        status = "开启" if enable else "关闭"
+        lib_str = ", ".join(sorted(target_names))
+        return True, f"NSFW 库 [{lib_str}] 已{status}，已同步到 Emby"
 
     @staticmethod
     async def get_user_nsfw_preferences(user: UserModel) -> List[str]:
@@ -978,11 +959,12 @@ class UserService:
     @staticmethod
     async def sync_user_to_emby(user: UserModel) -> Tuple[bool, str]:
         """
-        同步用户状态到 Emby
+        同步用户状态到 Emby（启用/禁用 + 媒体库访问）
 
-        同步内容包括：
-        - 账号禁用状态（ACTIVE_STATUS）
-        - NSFW 库访问权限（基于 NSFW_ALLOWED、NSFW 字段及用户的 nsfw_libraries 偏好）
+        媒体库访问策略遵循「三步重建」流程：
+        - 仅 NSFW 库受限：未授权 NSFW_ALLOWED 或用户关闭 NSFW 时全部隐藏，
+          否则按用户的 nsfw_libraries 偏好集合显隐
+        - 非 NSFW 库始终开放
         """
         if not user.EMBYID:
             return True, "用户未绑定 Emby 账户，跳过同步"
@@ -992,13 +974,15 @@ class UserService:
 
             emby = get_emby_client()
 
-            # 同步账号禁用状态
+            # 同步账号启用/禁用状态
             await emby.set_user_enabled(user.EMBYID, user.ACTIVE_STATUS)
 
-            # 同步 NSFW 访问权限：尊重用户 nsfw_libraries 偏好（per-library）
+            # 计算最终需要禁用的 NSFW 库名称
             nsfw_map = await EmbyService.find_nsfw_library_ids()
+            disable_names: list[str] = []
+
             if nsfw_map:
-                # 读取用户偏好集合
+                # 读取用户的 NSFW 偏好（允许的库列表）
                 preferred: set[str] = set()
                 if user.OTHER:
                     try:
@@ -1008,36 +992,30 @@ class UserService:
                                 preferred.add(name.strip())
                     except (json.JSONDecodeError, TypeError):
                         preferred = set()
-
                 # 仅保留仍存在的 NSFW 库
                 preferred &= set(nsfw_map.keys())
 
-                # 管理员未允许 → 全部撤销；允许但 NSFW=False → 全部撤销
                 if not user.NSFW_ALLOWED or not user.NSFW:
-                    grant_names: list[str] = []
-                    revoke_names = list(nsfw_map.keys())
+                    # 管理员未授权 / 用户未开启 → 全部 NSFW 库隐藏
+                    disable_names = list(nsfw_map.keys())
                 else:
-                    # 兼容旧记录：偏好为空但 NSFW=True，则授予全部
                     if not preferred:
+                        # 兼容旧记录：NSFW=True 但偏好集合为空，默认全部开启
                         preferred = set(nsfw_map.keys())
-                    grant_names = sorted(preferred)
-                    revoke_names = sorted(set(nsfw_map.keys()) - preferred)
+                    disable_names = sorted(set(nsfw_map.keys()) - preferred)
 
-                grant_ids = [nsfw_map[n] for n in grant_names if n in nsfw_map]
-                revoke_ids = [nsfw_map[n] for n in revoke_names if n in nsfw_map]
-
-                await emby.update_nsfw_access(
-                    user.EMBYID,
-                    grant_library_ids=grant_ids,
-                    grant_library_names=grant_names,
-                    revoke_library_ids=revoke_ids,
-                    revoke_library_names=revoke_names,
-                )
+            # 三步重建：开全 → 关全 → 排除法
+            # default_enable=True：非 NSFW 库始终保持开放
+            await emby.apply_library_policy(
+                user_id=user.EMBYID,
+                disable_names=disable_names,
+                default_enable=True,
+            )
 
             logger.info(
                 f"用户状态已同步到 Emby: {user.USERNAME} (UID: {user.UID}), "
                 f"状态: {'启用' if user.ACTIVE_STATUS else '禁用'}, "
-                f"NSFW: {'开启' if user.NSFW_ALLOWED and user.NSFW else '关闭'}"
+                f"NSFW 屏蔽: {disable_names or '无'}"
             )
             return True, "同步成功"
         except Exception as e:
