@@ -40,6 +40,7 @@ export interface SidebarNavItem {
 
 export const userNavItems: SidebarNavItem[] = [
   { href: "/dashboard", label: "仪表盘", icon: LayoutDashboard },
+  { href: "/announcements", label: "公告", icon: Megaphone },
   { href: "/media", label: "求片中心", icon: Film },
   { href: "/settings", label: "个人设置", icon: Settings },
 ];

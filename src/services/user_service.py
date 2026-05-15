@@ -878,13 +878,16 @@ class UserService:
 
     @staticmethod
     async def toggle_nsfw(user: UserModel, enable: bool, library_names: List[str] = None) -> Tuple[bool, str]:
-        """
-        切换 NSFW 库显示状态：先更新 DB 偏好集合，再通过 sync_user_to_emby 触发
-        统一的「三步重建」策略同步到 Emby。
+        """切换 NSFW 媒体库的可见性（基于 Sakura_embyboss show/hide 增量逻辑）。
+
+        - enable=True 调用 `EmbyClient.show_folders_by_names`
+        - enable=False 调用 `EmbyClient.hide_folders_by_names`
+        - 仅修改目标 NSFW 库的可见性，其他非 NSFW 库保持原样
+        - 同步更新本地 `user.OTHER.nsfw_libraries` 偏好集合
 
         :param user: 用户对象
         :param enable: 开启/关闭
-        :param library_names: 指定要操作的库名称列表，为 None 时操作所有 NSFW 库
+        :param library_names: 指定要操作的 NSFW 库名称；为空时操作全部已配置 NSFW 库
         """
         if not user.EMBYID:
             return False, "用户没有关联的 Emby 账户"
@@ -894,11 +897,11 @@ class UserService:
 
         from src.services.emby_service import EmbyService
 
-        nsfw_map = await EmbyService.find_nsfw_library_ids()
+        nsfw_map = await EmbyService.find_nsfw_library_ids()  # {name: guid}
         if not nsfw_map:
             return False, "系统未配置 NSFW 媒体库"
 
-        # 解析目标库（大小写不敏感）；为空时操作所有 NSFW 库
+        # 解析目标库名（大小写不敏感匹配配置项）
         if library_names:
             wanted = {n.strip().lower() for n in library_names if (n or '').strip()}
             target_names = {k for k in nsfw_map.keys() if k.strip().lower() in wanted}
@@ -907,7 +910,22 @@ class UserService:
         else:
             target_names = set(nsfw_map.keys())
 
-        # 读取用户偏好，更新后写回
+        emby = get_emby_client()
+
+        # 调用 Sakura 风格的增量策略写入
+        try:
+            if enable:
+                ok = await emby.show_folders_by_names(user.EMBYID, list(target_names))
+            else:
+                ok = await emby.hide_folders_by_names(user.EMBYID, list(target_names))
+        except Exception as e:
+            logger.error(f"切换 NSFW 库失败: {e}", exc_info=True)
+            return False, f"操作失败: {e}"
+
+        if not ok:
+            return False, "更新 Emby NSFW 库权限失败"
+
+        # 同步更新 DB 中的偏好集合（仅保留仍在配置中的 NSFW 库名）
         other_data: dict = {}
         if user.OTHER:
             try:
@@ -918,23 +936,15 @@ class UserService:
                 other_data = {}
 
         prev_enabled = set(other_data.get('nsfw_libraries') or [])
-
         if enable:
-            enabled_nsfw = prev_enabled | target_names
+            enabled_nsfw = (prev_enabled | target_names) & set(nsfw_map.keys())
         else:
-            enabled_nsfw = prev_enabled - target_names
-        # 仅保留仍在配置中的 NSFW 库
-        enabled_nsfw &= set(nsfw_map.keys())
+            enabled_nsfw = (prev_enabled - target_names) & set(nsfw_map.keys())
 
         other_data['nsfw_libraries'] = sorted(enabled_nsfw)
         user.OTHER = json.dumps(other_data)
         user.NSFW = len(enabled_nsfw) > 0
         await UserOperate.update_user(user)
-
-        # 由 sync_user_to_emby 统一调用 apply_library_policy 落地
-        ok, msg = await UserService.sync_user_to_emby(user)
-        if not ok:
-            return False, f"更新 Emby NSFW 库权限失败: {msg}"
 
         status = "开启" if enable else "关闭"
         lib_str = ", ".join(sorted(target_names))
@@ -958,13 +968,13 @@ class UserService:
 
     @staticmethod
     async def sync_user_to_emby(user: UserModel) -> Tuple[bool, str]:
-        """
-        同步用户状态到 Emby（启用/禁用 + 媒体库访问）
+        """同步用户状态到 Emby（基于 Sakura_embyboss 增量 show/hide 模式）。
 
-        媒体库访问策略遵循「三步重建」流程：
-        - 仅 NSFW 库受限：未授权 NSFW_ALLOWED 或用户关闭 NSFW 时全部隐藏，
-          否则按用户的 nsfw_libraries 偏好集合显隐
-        - 非 NSFW 库始终开放
+        - 同步 ACTIVE_STATUS（启用/禁用账户）
+        - 对每个已配置的 NSFW 媒体库，按 `user.NSFW_ALLOWED` + 偏好集合决定 show 或 hide：
+          * NSFW_ALLOWED=False 或 NSFW=False → 全部 NSFW 库 hide
+          * 否则按 OTHER.nsfw_libraries 偏好显隐
+        - 非 NSFW 库不会被本方法触碰，保持现有可见性
         """
         if not user.EMBYID:
             return True, "用户未绑定 Emby 账户，跳过同步"
@@ -974,15 +984,15 @@ class UserService:
 
             emby = get_emby_client()
 
-            # 同步账号启用/禁用状态
+            # 1. 启用/禁用账户
             await emby.set_user_enabled(user.EMBYID, user.ACTIVE_STATUS)
 
-            # 计算最终需要禁用的 NSFW 库名称
-            nsfw_map = await EmbyService.find_nsfw_library_ids()
-            disable_names: list[str] = []
-
+            # 2. 同步 NSFW 媒体库可见性
+            nsfw_map = await EmbyService.find_nsfw_library_ids()  # {name: guid}
             if nsfw_map:
-                # 读取用户的 NSFW 偏好（允许的库列表）
+                all_nsfw = set(nsfw_map.keys())
+
+                # 解析用户偏好（已选择显示的 NSFW 库名）
                 preferred: set[str] = set()
                 if user.OTHER:
                     try:
@@ -992,31 +1002,35 @@ class UserService:
                                 preferred.add(name.strip())
                     except (json.JSONDecodeError, TypeError):
                         preferred = set()
-                # 仅保留仍存在的 NSFW 库
-                preferred &= set(nsfw_map.keys())
+                preferred &= all_nsfw
 
                 if not user.NSFW_ALLOWED or not user.NSFW:
-                    # 管理员未授权 / 用户未开启 → 全部 NSFW 库隐藏
-                    disable_names = list(nsfw_map.keys())
+                    # 没权限或主开关关 → 隐藏全部 NSFW
+                    show_names: list[str] = []
+                    hide_names = sorted(all_nsfw)
                 else:
+                    # 兼容旧记录：NSFW=True 但偏好为空 → 视为全部开启
                     if not preferred:
-                        # 兼容旧记录：NSFW=True 但偏好集合为空，默认全部开启
-                        preferred = set(nsfw_map.keys())
-                    disable_names = sorted(set(nsfw_map.keys()) - preferred)
+                        preferred = set(all_nsfw)
+                    show_names = sorted(preferred)
+                    hide_names = sorted(all_nsfw - preferred)
 
-            # 三步重建：开全 → 关全 → 排除法
-            # default_enable=True：非 NSFW 库始终保持开放
-            await emby.apply_library_policy(
-                user_id=user.EMBYID,
-                disable_names=disable_names,
-                default_enable=True,
-            )
+                if hide_names:
+                    await emby.hide_folders_by_names(user.EMBYID, hide_names)
+                if show_names:
+                    await emby.show_folders_by_names(user.EMBYID, show_names)
 
-            logger.info(
-                f"用户状态已同步到 Emby: {user.USERNAME} (UID: {user.UID}), "
-                f"状态: {'启用' if user.ACTIVE_STATUS else '禁用'}, "
-                f"NSFW 屏蔽: {disable_names or '无'}"
-            )
+                logger.info(
+                    f"用户状态已同步到 Emby: {user.USERNAME} (UID: {user.UID}), "
+                    f"状态: {'启用' if user.ACTIVE_STATUS else '禁用'}, "
+                    f"NSFW 显示: {show_names or '无'}, 隐藏: {hide_names or '无'}"
+                )
+            else:
+                logger.info(
+                    f"用户状态已同步到 Emby: {user.USERNAME} (UID: {user.UID}), "
+                    f"状态: {'启用' if user.ACTIVE_STATUS else '禁用'}, NSFW 库未配置"
+                )
+
             return True, "同步成功"
         except Exception as e:
             logger.error(f"同步用户状态到 Emby 失败: {e}", exc_info=True)

@@ -50,12 +50,15 @@ interface AnnouncementBoardProps {
   collapseAfter?: number;
   /** 自定义标题；传入 null 隐藏标题 */
   title?: string | null;
+  /** 列表为空时是否显示占位（独立页面建议 true，dashboard 嵌入建议 false） */
+  showEmptyState?: boolean;
 }
 
 export function AnnouncementBoard({
   limit = 50,
   collapseAfter = 2,
   title = "公告板",
+  showEmptyState = false,
 }: AnnouncementBoardProps) {
   const [items, setItems] = useState<Announcement[]>([]);
   const [loading, setLoading] = useState(true);
@@ -83,11 +86,33 @@ export function AnnouncementBoard({
     void load();
   }, [load]);
 
-  if (loading) return null;
-  if (error || items.length === 0) return null;
+  if (loading && !showEmptyState) return null;
+  if (error && !showEmptyState) return null;
+  if (items.length === 0 && !showEmptyState) return null;
 
   const visible = expanded ? items : items.slice(0, collapseAfter);
   const hasMore = items.length > collapseAfter;
+
+  // Empty / loading / error states for standalone page mode
+  if (showEmptyState && (loading || error || items.length === 0)) {
+    return (
+      <section className="space-y-3">
+        {title !== null && (
+          <h2 className="text-sm font-bold tracking-wider uppercase text-muted-foreground flex items-center gap-2">
+            <Megaphone className="h-4 w-4" />
+            {title}
+          </h2>
+        )}
+        <div className="rounded-xl border border-dashed p-10 text-center text-sm text-muted-foreground">
+          {loading
+            ? "正在加载公告..."
+            : error
+              ? `公告加载失败：${error}`
+              : "暂无公告"}
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section className="space-y-3">

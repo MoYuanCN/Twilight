@@ -455,10 +455,12 @@ class EmbyService:
         library_ids: List[str],
         enable_all: bool = False
     ) -> Tuple[bool, str]:
-        """设置用户媒体库访问权限（通过统一的三步重建流程）。
+        """设置用户可访问的媒体库（管理员严格白名单场景）。
 
-        - enable_all=True: 所有媒体库可见，default_enable=True
-        - enable_all=False: 仅 library_ids 指定的媒体库可见，其余隐藏
+        - enable_all=True：用户可见所有库
+        - enable_all=False：仅 library_ids 指定的库可见，其余按名称加入 BlockedMediaFolders
+
+        实现委托给 `EmbyClient.set_user_libraries`（基于 Sakura 单次 POST 模式）。
         """
         if not user.EMBYID:
             return False, "用户没有关联的 Emby 账户"
@@ -466,26 +468,11 @@ class EmbyService:
         emby = get_emby_client()
 
         try:
-            libraries = await emby.get_libraries()
-            id_to_name = {lib.id: (lib.name or '').strip() for lib in libraries}
-
-            if enable_all:
-                success = await emby.apply_library_policy(
-                    user_id=user.EMBYID,
-                    enable_names=[name for name in id_to_name.values() if name],
-                    disable_names=[],
-                    default_enable=True,
-                )
-            else:
-                enable_names = [id_to_name[lib_id] for lib_id in library_ids if lib_id in id_to_name]
-                # 严格白名单：未在 enable 列表中的媒体库默认禁用
-                success = await emby.apply_library_policy(
-                    user_id=user.EMBYID,
-                    enable_names=enable_names,
-                    disable_names=[],
-                    default_enable=False,
-                )
-
+            success = await emby.set_user_libraries(
+                user_id=user.EMBYID,
+                allowed_library_ids=list(library_ids or []),
+                enable_all=bool(enable_all),
+            )
             if success:
                 return True, "媒体库权限已更新"
             return False, "更新失败"
