@@ -1070,79 +1070,106 @@ class EmbyClient:
         disable_names: Optional[List[str]] = None,
         default_enable: bool = True,
     ) -> bool:
-        """以「先开全部 → 再关全部 → 按排除法重建」三步流程同步媒体库访问策略。
+        """以「先开全部 → 再关全部 → 按排除法逐个开启/关闭」流程同步媒体库访问策略。
 
-        实现遵循用户要求的确定性写入序列，保证每次调用都从干净状态重新构建策略，
-        避免增量更新导致的策略漂移。
+        关键点：Step 3 会扫描全部媒体库，对每一个媒体库都明确决定"开启"还是"关闭"，
+        然后**一次性**写入完整策略（EnabledFolders 包含所有应开启的库，
+        BlockedMediaFolders 仅包含应关闭的库）。
+        即使 Step 1/2 失败，Step 3 仍会执行，保证用户不会因中间步骤异常而被卡在"全关闭"状态。
 
-        :param enable_names: 显式启用的媒体库名称列表。
-        :param disable_names: 显式禁用的媒体库名称列表。
+        :param enable_names: 显式开启的媒体库名称列表。
+        :param disable_names: 显式关闭的媒体库名称列表。
         :param default_enable: 既不在 enable 也不在 disable 列表中的媒体库的默认状态：
-            - True：保持开启（适用于用户自助切换 NSFW 等"局部修改"场景）
-            - False：保持关闭（适用于管理员严格白名单的"全量限制"场景）
+            - True：开启（用户自助切换 NSFW 等"局部修改"场景）
+            - False：关闭（管理员严格白名单的"全量限制"场景）
         """
         enable_set = {n.strip() for n in (enable_names or []) if n and n.strip()}
         disable_set = {n.strip() for n in (disable_names or []) if n and n.strip()}
 
         libraries = await self.get_libraries()
         if not libraries:
-            logger.warning("apply_library_policy: 未获取到任何媒体库，跳过同步")
+            logger.warning("apply_library_policy: 未获取到任何媒体库，跳过同步 user=%s", user_id)
             return False
 
-        all_lib_ids = [lib.id for lib in libraries]
-        all_lib_names = [lib.name.strip() for lib in libraries if lib.name]
+        all_lib_ids = [lib.id for lib in libraries if lib.id]
+        all_lib_names = [(lib.name or '').strip() for lib in libraries if lib.name and lib.name.strip()]
 
-        # Step 1: 先开启所有媒体库（建立基线）
-        ok = await self.update_user_enabled_folders(
-            user_id=user_id,
-            enabled_folder_ids=all_lib_ids,
-            blocked_media_folders=[],
-            enable_all_folders=True,
-        )
-        if not ok:
-            logger.error("apply_library_policy[step1=enable_all] 失败: user=%s", user_id)
-            return False
-
-        # Step 2: 再关闭所有媒体库（清空可见列表）
-        ok = await self.update_user_enabled_folders(
-            user_id=user_id,
-            enabled_folder_ids=[],
-            blocked_media_folders=all_lib_names,
-            enable_all_folders=False,
-        )
-        if not ok:
-            logger.error("apply_library_policy[step2=disable_all] 失败: user=%s", user_id)
-            return False
-
-        # Step 3: 按排除法逐个扫描媒体库，构建目标策略
+        # 先把 Step 3 的目标状态算清楚：每个媒体库都明确归入 enable 或 block
         target_enabled_ids: List[str] = []
         target_blocked_names: List[str] = []
         for lib in libraries:
             name = (lib.name or '').strip()
+            lib_id = lib.id
+            if not lib_id:
+                continue
             if name and name in disable_set:
+                # 在关闭列表 → 关闭
                 target_blocked_names.append(name)
             elif name and name in enable_set:
-                target_enabled_ids.append(lib.id)
+                # 在开启列表 → 开启
+                target_enabled_ids.append(lib_id)
             else:
+                # 不在开启/关闭列表 → 按 default_enable 决定
                 if default_enable:
-                    target_enabled_ids.append(lib.id)
-                else:
-                    if name:
-                        target_blocked_names.append(name)
+                    target_enabled_ids.append(lib_id)
+                elif name:
+                    target_blocked_names.append(name)
 
+        # Step 1: 先开启全部媒体库（基线）— 失败不中断，最终以 Step 3 为准
+        try:
+            await self.update_user_enabled_folders(
+                user_id=user_id,
+                enabled_folder_ids=all_lib_ids,
+                blocked_media_folders=[],
+                enable_all_folders=True,
+            )
+            logger.debug("apply_library_policy[step1=enable_all] user=%s", user_id)
+        except Exception as e:
+            logger.warning("apply_library_policy[step1] 异常已忽略，继续下一步: user=%s err=%s", user_id, e)
+
+        # Step 2: 再关闭全部媒体库（清空基线）— 失败也不中断
+        try:
+            await self.update_user_enabled_folders(
+                user_id=user_id,
+                enabled_folder_ids=[],
+                blocked_media_folders=all_lib_names,
+                enable_all_folders=False,
+            )
+            logger.debug("apply_library_policy[step2=disable_all] user=%s", user_id)
+        except Exception as e:
+            logger.warning("apply_library_policy[step2] 异常已忽略，继续下一步: user=%s err=%s", user_id, e)
+
+        # Step 3: 排除法应用——一次性写入完整状态：
+        #   EnabledFolders = 所有应开启的库 ID（包括"不在开关流程中"的库）
+        #   BlockedMediaFolders = 仅应关闭的库名（覆盖 Step 2 的全部封禁）
         ok = await self.update_user_enabled_folders(
             user_id=user_id,
             enabled_folder_ids=target_enabled_ids,
             blocked_media_folders=target_blocked_names,
             enable_all_folders=False,
         )
+
         if not ok:
-            logger.error("apply_library_policy[step3=apply] 失败: user=%s", user_id)
+            logger.error(
+                "apply_library_policy[step3=apply] 写入失败，尝试回退到可见基线避免用户被锁: user=%s",
+                user_id,
+            )
+            # 回退：保证用户至少能看到所有未被显式关闭的库，避免被卡在"全关闭"状态
+            try:
+                await self.update_user_enabled_folders(
+                    user_id=user_id,
+                    enabled_folder_ids=all_lib_ids,
+                    blocked_media_folders=target_blocked_names,
+                    enable_all_folders=True,
+                )
+            except Exception as e:
+                logger.error("apply_library_policy 回退也失败: user=%s err=%s", user_id, e)
             return False
 
         logger.info(
-            "apply_library_policy 完成: user=%s, enabled=%d, blocked=%d, default_enable=%s",
-            user_id, len(target_enabled_ids), len(target_blocked_names), default_enable,
+            "apply_library_policy 完成: user=%s, enabled=%d, blocked=%d (%s), default_enable=%s",
+            user_id, len(target_enabled_ids), len(target_blocked_names),
+            target_blocked_names, default_enable,
         )
         return True
 
