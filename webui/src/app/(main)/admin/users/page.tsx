@@ -279,9 +279,16 @@ export default function AdminUsersPage() {
       try {
         const libRes = await api.getUserLibraries(user.uid);
         if (libRes.success && libRes.data) {
-          setLibraryAllList(libRes.data.all_libraries || []);
-          setLibraryEnabledIds(new Set(libRes.data.enabled_ids || []));
-          setLibraryEnableAll(Boolean(libRes.data.enable_all));
+          const allLibs = libRes.data.all_libraries || [];
+          const enabledIds = libRes.data.enabled_ids || [];
+          const enableAll = Boolean(libRes.data.enable_all);
+          setLibraryAllList(allLibs);
+          // enable_all=True 时 Emby 返回 EnabledFolders=[]，但语义上等价于"全部勾选"
+          // 预先把所有库 ID 填进去，避免用户取消"全部允许"开关后误判为"全部屏蔽"
+          setLibraryEnabledIds(
+            new Set(enableAll ? allLibs.map((lib) => lib.id) : enabledIds)
+          );
+          setLibraryEnableAll(enableAll);
           setLibraryHasEmby(Boolean(libRes.data.has_emby));
         }
       } catch (error) {

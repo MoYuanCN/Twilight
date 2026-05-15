@@ -73,19 +73,26 @@ class EmbyUser:
 
 @dataclass
 class EmbyLibrary:
-    """Emby 媒体库信息"""
+    """Emby 媒体库信息。
+
+    注意：`id` 优先使用 ItemId/Guid（VirtualFolders 返回的 GUID），
+    因为 `EnabledFolders` 策略字段需要这个 GUID。
+    """
     id: str
     name: str
     collection_type: str
     item_id: str = ''
-    
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'EmbyLibrary':
+        # /Library/VirtualFolders 返回的库以 ItemId / Guid 表示，这才是 EnabledFolders 接受的值
+        # /Items 或其他端点可能返回 Id；按优先级回退取值
+        item_id = data.get('ItemId') or data.get('Guid') or data.get('Id', '')
         return cls(
-            id=data.get('Id', data.get('ItemId', '')),
+            id=item_id,
             name=data.get('Name', ''),
             collection_type=data.get('CollectionType', ''),
-            item_id=data.get('ItemId', ''),
+            item_id=item_id,
         )
 
 
@@ -612,13 +619,6 @@ class EmbyClient:
         """设置用户是否隐藏"""
         return await self.update_user_policy(user_id, {'IsHidden': is_hidden})
 
-    async def set_user_libraries(self, user_id: str, library_ids: List[str], enable_all: bool = False) -> bool:
-        """设置用户可访问的媒体库"""
-        return await self.update_user_policy(user_id, {
-            'EnableAllFolders': enable_all,
-            'EnabledFolders': library_ids if not enable_all else [],
-        })
-
     # ==================== 媒体库 API ====================
     
     async def get_libraries(self) -> List[EmbyLibrary]:
@@ -990,79 +990,6 @@ class EmbyClient:
             params['MinDate'] = min_date
         return await self._request('GET', '/System/ActivityLog/Entries', params=params)
 
-    async def get_folder_ids_by_names(self, folder_names: List[str]) -> List[str]:
-        """根据媒体库名称查找文件夹 ID（大小写不敏感）。"""
-        if not folder_names:
-            return []
-
-        name_map = {name.strip().lower(): name for name in folder_names if name and name.strip()}
-        if not name_map:
-            return []
-
-        libraries = await self.get_libraries()
-        ids: List[str] = []
-        for lib in libraries:
-            if lib.name.strip().lower() in name_map:
-                ids.append(lib.id)
-        return ids
-
-    async def update_user_enabled_folders(
-        self,
-        user_id: str,
-        enabled_folder_ids: Optional[List[str]] = None,
-        blocked_media_folders: Optional[List[str]] = None,
-        enable_all_folders: bool = True,
-    ) -> bool:
-        """
-        更新用户媒体库策略（参考 Sakura 的单次策略更新思路）。
-
-        - 先读取当前策略
-        - 仅覆盖与媒体库访问相关字段
-        - 单次 POST 提交
-        """
-        user = await self.get_user(user_id)
-        if not user:
-            return False
-
-        policy = user.policy.copy()
-        policy['EnableAllFolders'] = bool(enable_all_folders)
-        if enabled_folder_ids is not None:
-            policy['EnabledFolders'] = list(dict.fromkeys(enabled_folder_ids))
-        if blocked_media_folders is not None:
-            policy['BlockedMediaFolders'] = list(dict.fromkeys(blocked_media_folders))
-
-        try:
-            await self._request('POST', f'/Users/{user_id}/Policy', json=policy)
-            self._users_cache.clear()
-            return True
-        except EmbyError as e:
-            logger.error(f"更新用户媒体库策略失败: {e}")
-            return False
-
-    async def _resolve_current_folder_state(
-        self, user_id: str
-    ) -> Optional[tuple[list[str], bool, list[str]]]:
-        """
-        读取用户当前媒体库策略状态（参考 Sakura 的 get_current_enabled_folder_ids）。
-
-        :return: (enabled_folder_ids, enable_all_folders, blocked_media_folders) 或 None
-        """
-        user = await self.get_user(user_id)
-        if not user:
-            return None
-
-        policy = user.policy
-        enable_all = bool(policy.get('EnableAllFolders', False))
-        blocked = list(policy.get('BlockedMediaFolders', []) or [])
-
-        if enable_all:
-            libraries = await self.get_libraries()
-            enabled = [lib.id for lib in libraries]
-        else:
-            enabled = list(policy.get('EnabledFolders', []) or [])
-
-        return enabled, enable_all, blocked
-
     async def apply_library_policy(
         self,
         user_id: str,
@@ -1070,265 +997,85 @@ class EmbyClient:
         disable_names: Optional[List[str]] = None,
         default_enable: bool = True,
     ) -> bool:
-        """以「先开全部 → 再关全部 → 按排除法逐个开启/关闭」流程同步媒体库访问策略。
+        """根据 Emby 官方 API 设置用户媒体库访问策略。
 
-        关键点：Step 3 会扫描全部媒体库，对每一个媒体库都明确决定"开启"还是"关闭"，
-        然后**一次性**写入完整策略（EnabledFolders 包含所有应开启的库，
-        BlockedMediaFolders 仅包含应关闭的库）。
-        即使 Step 1/2 失败，Step 3 仍会执行，保证用户不会因中间步骤异常而被卡在"全关闭"状态。
+        实现遵循 Emby UserPolicy 文档与社区实证（https://emby.media/community/index.php?/topic/130313/）：
 
-        :param enable_names: 显式开启的媒体库名称列表。
-        :param disable_names: 显式关闭的媒体库名称列表。
+        - ``POST /Users/{Id}/Policy`` 是一次性完整替换式写入，不能拆成多步
+        - ``EnableAllFolders=True``：用户可见所有媒体库，``EnabledFolders`` 被忽略
+        - ``EnableAllFolders=False`` + ``EnabledFolders=[Guid 列表]``：用户仅可见列表中的库
+        - ``BlockedMediaFolders`` 与 ``EnabledFolders`` 语义冲突；
+          官方推荐"用 EnabledFolders 精确白名单控制"，不应再发送 BlockedMediaFolders
+
+        本实现根据 enable/disable/default_enable 一次性算出最终的可见库 Guid 集合，
+        然后单次 POST UserPolicy 完成所有改动。
+
+        :param enable_names: 显式开启的媒体库名称列表
+        :param disable_names: 显式关闭的媒体库名称列表
         :param default_enable: 既不在 enable 也不在 disable 列表中的媒体库的默认状态：
-            - True：开启（用户自助切换 NSFW 等"局部修改"场景）
-            - False：关闭（管理员严格白名单的"全量限制"场景）
+            - True：开启（用户自助切换 NSFW 等"局部修改"场景，未触及的库保持可见）
+            - False：关闭（管理员严格白名单的"全量限制"场景，未授权的库不可见）
         """
         enable_set = {n.strip() for n in (enable_names or []) if n and n.strip()}
         disable_set = {n.strip() for n in (disable_names or []) if n and n.strip()}
 
         libraries = await self.get_libraries()
         if not libraries:
-            logger.warning("apply_library_policy: 未获取到任何媒体库，跳过同步 user=%s", user_id)
+            logger.warning("apply_library_policy: 未获取到任何媒体库 user=%s", user_id)
             return False
 
-        all_lib_ids = [lib.id for lib in libraries if lib.id]
-        all_lib_names = [(lib.name or '').strip() for lib in libraries if lib.name and lib.name.strip()]
-
-        # 先把 Step 3 的目标状态算清楚：每个媒体库都明确归入 enable 或 block
-        target_enabled_ids: List[str] = []
-        target_blocked_names: List[str] = []
+        # 对每个媒体库做"排除法"决策：在禁用列表→不加入；在启用列表→加入；
+        # 既不在禁用也不在启用列表→看 default_enable
+        target_visible_ids: List[str] = []
         for lib in libraries:
             name = (lib.name or '').strip()
-            lib_id = lib.id
+            lib_id = (lib.id or '').strip()
             if not lib_id:
                 continue
             if name and name in disable_set:
-                # 在关闭列表 → 关闭
-                target_blocked_names.append(name)
-            elif name and name in enable_set:
-                # 在开启列表 → 开启
-                target_enabled_ids.append(lib_id)
-            else:
-                # 不在开启/关闭列表 → 按 default_enable 决定
-                if default_enable:
-                    target_enabled_ids.append(lib_id)
-                elif name:
-                    target_blocked_names.append(name)
+                continue
+            if name and name in enable_set:
+                target_visible_ids.append(lib_id)
+                continue
+            if default_enable:
+                target_visible_ids.append(lib_id)
 
-        # Step 1: 先开启全部媒体库（基线）— 失败不中断，最终以 Step 3 为准
+        target_visible_ids = list(dict.fromkeys(target_visible_ids))  # 去重保序
+
+        # 读取当前完整 policy（保留 EnableContentDeletion / SimultaneousStreamLimit 等其他字段）
+        user = await self.get_user(user_id)
+        if not user:
+            logger.error("apply_library_policy: 用户不存在 user=%s", user_id)
+            return False
+
+        policy = user.policy.copy()
+        all_lib_ids = {(lib.id or '').strip() for lib in libraries if (lib.id or '').strip()}
+
+        if all_lib_ids and set(target_visible_ids) == all_lib_ids:
+            # 覆盖全部库 → 用 EnableAllFolders=True，最简洁、避免 GUID 漂移
+            policy['EnableAllFolders'] = True
+            policy['EnabledFolders'] = []
+        else:
+            # 严格白名单 → EnableAllFolders=False + 完整 GUID 列表
+            policy['EnableAllFolders'] = False
+            policy['EnabledFolders'] = target_visible_ids
+
+        # 遵循 Emby 官方建议，不发送 BlockedMediaFolders（与 EnabledFolders 语义冲突）
+        # 若现有 policy 残留旧值则清空，避免叠加屏蔽
+        policy['BlockedMediaFolders'] = []
+
         try:
-            await self.update_user_enabled_folders(
-                user_id=user_id,
-                enabled_folder_ids=all_lib_ids,
-                blocked_media_folders=[],
-                enable_all_folders=True,
-            )
-            logger.debug("apply_library_policy[step1=enable_all] user=%s", user_id)
-        except Exception as e:
-            logger.warning("apply_library_policy[step1] 异常已忽略，继续下一步: user=%s err=%s", user_id, e)
-
-        # Step 2: 再关闭全部媒体库（清空基线）— 失败也不中断
-        try:
-            await self.update_user_enabled_folders(
-                user_id=user_id,
-                enabled_folder_ids=[],
-                blocked_media_folders=all_lib_names,
-                enable_all_folders=False,
-            )
-            logger.debug("apply_library_policy[step2=disable_all] user=%s", user_id)
-        except Exception as e:
-            logger.warning("apply_library_policy[step2] 异常已忽略，继续下一步: user=%s err=%s", user_id, e)
-
-        # Step 3: 排除法应用——一次性写入完整状态：
-        #   EnabledFolders = 所有应开启的库 ID（包括"不在开关流程中"的库）
-        #   BlockedMediaFolders = 仅应关闭的库名（覆盖 Step 2 的全部封禁）
-        ok = await self.update_user_enabled_folders(
-            user_id=user_id,
-            enabled_folder_ids=target_enabled_ids,
-            blocked_media_folders=target_blocked_names,
-            enable_all_folders=False,
-        )
-
-        if not ok:
-            logger.error(
-                "apply_library_policy[step3=apply] 写入失败，尝试回退到可见基线避免用户被锁: user=%s",
-                user_id,
-            )
-            # 回退：保证用户至少能看到所有未被显式关闭的库，避免被卡在"全关闭"状态
-            try:
-                await self.update_user_enabled_folders(
-                    user_id=user_id,
-                    enabled_folder_ids=all_lib_ids,
-                    blocked_media_folders=target_blocked_names,
-                    enable_all_folders=True,
-                )
-            except Exception as e:
-                logger.error("apply_library_policy 回退也失败: user=%s err=%s", user_id, e)
+            await self._request('POST', f'/Users/{user_id}/Policy', json=policy)
+            self._users_cache.clear()
+        except EmbyError as e:
+            logger.error("apply_library_policy: 写入 UserPolicy 失败 user=%s err=%s", user_id, e)
             return False
 
         logger.info(
-            "apply_library_policy 完成: user=%s, enabled=%d, blocked=%d (%s), default_enable=%s",
-            user_id, len(target_enabled_ids), len(target_blocked_names),
-            target_blocked_names, default_enable,
+            "apply_library_policy 完成: user=%s, enable_all=%s, visible=%d/%d",
+            user_id, policy['EnableAllFolders'], len(target_visible_ids), len(all_lib_ids),
         )
         return True
-
-    async def hide_folders_by_names(self, user_id: str, folder_names: List[str]) -> bool:
-        """按名称隐藏媒体库（从 EnabledFolders 移除并加入 BlockedMediaFolders）。"""
-        hide_ids = await self.get_folder_ids_by_names(folder_names)
-        if not hide_ids:
-            return True
-
-        state = await self._resolve_current_folder_state(user_id)
-        if state is None:
-            return False
-        enabled_folders, _, blocked_folders = state
-
-        new_enabled = [fid for fid in enabled_folders if fid not in hide_ids]
-        new_blocked = list(blocked_folders)
-        for name in folder_names:
-            cleaned = (name or '').strip()
-            if cleaned and cleaned not in new_blocked:
-                new_blocked.append(cleaned)
-
-        return await self.update_user_enabled_folders(
-            user_id=user_id,
-            enabled_folder_ids=new_enabled,
-            blocked_media_folders=new_blocked,
-            enable_all_folders=False,
-        )
-
-    async def show_folders_by_names(self, user_id: str, folder_names: List[str]) -> bool:
-        """按名称显示媒体库（加入 EnabledFolders 并从 BlockedMediaFolders 移除）。"""
-        show_ids = await self.get_folder_ids_by_names(folder_names)
-        if not show_ids:
-            return True
-
-        state = await self._resolve_current_folder_state(user_id)
-        if state is None:
-            return False
-        enabled_folders, enable_all, blocked_folders = state
-
-        # 已启用全部媒体库时，仅需清理对应的 BlockedMediaFolders 即可
-        if enable_all:
-            remove_names = {(name or '').strip() for name in folder_names if (name or '').strip()}
-            new_blocked = [name for name in blocked_folders if name not in remove_names]
-            return await self.update_user_enabled_folders(
-                user_id=user_id,
-                blocked_media_folders=new_blocked,
-                enable_all_folders=True,
-            )
-
-        new_enabled = list(dict.fromkeys(list(enabled_folders) + list(show_ids)))
-        remove_names = {(name or '').strip() for name in folder_names if (name or '').strip()}
-        new_blocked = [name for name in blocked_folders if name not in remove_names]
-
-        return await self.update_user_enabled_folders(
-            user_id=user_id,
-            enabled_folder_ids=new_enabled,
-            blocked_media_folders=new_blocked,
-            enable_all_folders=False,
-        )
-
-    # ==================== NSFW 库管理 ====================
-
-    async def update_nsfw_access(
-        self,
-        user_id: str,
-        grant_library_ids: List[str] = None,
-        revoke_library_ids: List[str] = None,
-        grant_library_names: List[str] = None,
-        revoke_library_names: List[str] = None,
-    ) -> bool:
-        """
-        批量更新用户 NSFW 库访问权限（单次读取-合并-写入，参考 Sakura 逻辑）。
-
-        :param grant_library_ids: 要授予的库 ID 列表
-        :param revoke_library_ids: 要撤销的库 ID 列表
-        :param grant_library_names: 要授予的库名称列表（用于 BlockedMediaFolders）
-        :param revoke_library_names: 要撤销的库名称列表（用于 BlockedMediaFolders）
-        """
-        grant_ids = list(grant_library_ids or [])
-        revoke_ids = list(revoke_library_ids or [])
-        grant_names = [n for n in (grant_library_names or []) if (n or '').strip()]
-        revoke_names = [n for n in (revoke_library_names or []) if (n or '').strip()]
-
-        if not grant_ids and not revoke_ids and not grant_names and not revoke_names:
-            return True
-
-        # 名称缺失时按 ID 反查名称，保证 BlockedMediaFolders 同步
-        if (grant_ids and not grant_names) or (revoke_ids and not revoke_names):
-            libraries = await self.get_libraries()
-            id_to_name = {lib.id: lib.name for lib in libraries}
-            if grant_ids and not grant_names:
-                grant_names = [id_to_name[i] for i in grant_ids if i in id_to_name]
-            if revoke_ids and not revoke_names:
-                revoke_names = [id_to_name[i] for i in revoke_ids if i in id_to_name]
-
-        # ID 缺失时按名称解析（容错处理重名/缺失映射）
-        if (grant_names and not grant_ids) or (revoke_names and not revoke_ids):
-            if grant_names and not grant_ids:
-                grant_ids = await self.get_folder_ids_by_names(grant_names)
-            if revoke_names and not revoke_ids:
-                revoke_ids = await self.get_folder_ids_by_names(revoke_names)
-
-        state = await self._resolve_current_folder_state(user_id)
-        if state is None:
-            return False
-        enabled_folders, _, blocked_folders = state
-
-        # 计算最终 EnabledFolders：先撤销、再授予，最后去重保持顺序
-        revoke_id_set = set(revoke_ids)
-        new_enabled = [fid for fid in enabled_folders if fid not in revoke_id_set]
-        for lib_id in grant_ids:
-            if lib_id and lib_id not in new_enabled:
-                new_enabled.append(lib_id)
-
-        # 计算最终 BlockedMediaFolders：先移除被授予的、再追加被撤销的
-        grant_name_set = {n.strip() for n in grant_names if n.strip()}
-        new_blocked = [name for name in blocked_folders if name and name.strip() not in grant_name_set]
-        for name in revoke_names:
-            cleaned = name.strip()
-            if cleaned and cleaned not in new_blocked:
-                new_blocked.append(cleaned)
-
-        return await self.update_user_enabled_folders(
-            user_id=user_id,
-            enabled_folder_ids=new_enabled,
-            blocked_media_folders=new_blocked,
-            enable_all_folders=False,
-        )
-
-    async def grant_nsfw_access(self, user_id: str) -> bool:
-        """授予用户所有 NSFW 库访问权限（向后兼容）"""
-        from src.services.emby_service import EmbyService
-        
-        nsfw_map = await EmbyService.find_nsfw_library_ids()
-        if not nsfw_map:
-            logger.warning("未找到 NSFW 库")
-            return False
-        
-        return await self.update_nsfw_access(
-            user_id,
-            grant_library_ids=list(nsfw_map.values()),
-            grant_library_names=list(nsfw_map.keys()),
-        )
-
-    async def revoke_nsfw_access(self, user_id: str) -> bool:
-        """撤销用户所有 NSFW 库访问权限（向后兼容）"""
-        from src.services.emby_service import EmbyService
-        
-        nsfw_map = await EmbyService.find_nsfw_library_ids()
-        if not nsfw_map:
-            logger.warning("未找到 NSFW 库")
-            return False
-        
-        return await self.update_nsfw_access(
-            user_id,
-            revoke_library_ids=list(nsfw_map.values()),
-            revoke_library_names=list(nsfw_map.keys()),
-        )
-
 
 # ==================== 全局实例 ====================
 
