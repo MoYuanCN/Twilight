@@ -4,25 +4,32 @@
 
 ## 新手部署
 
-1. [项目概览](../README.md)
-2. [安装部署](./INSTALL.md)
-3. [Windows 快速启动](./QUICKSTART-Windows.md)
+| 文档 | 适用人群 |
+| ---- | -------- |
+| [项目概览](../README.md) | 所有用户 |
+| [安装部署](./INSTALL.md) | 部署运维 |
+| [Windows 快速启动](./QUICKSTART-Windows.md) | Windows 用户首次试用 |
 
 ## 后端与接口
 
-1. [后端 API](./BACKEND_API.md)
-2. [API Key 接口](./API_KEY_API.md)
+| 文档 | 用途 |
+| ---- | ---- |
+| [后端 API 参考](./BACKEND_API.md) | REST API 接口规范、认证、错误码 |
+| [API Key 外部接入](./API_KEY_API.md) | 第三方系统集成、权限矩阵 |
 
 ## 前端与开发
 
-1. [前端开发](./FRONTEND_API.md)
-2. [开发指南](./DEVELOPMENT.md)
+| 文档 | 用途 |
+| ---- | ---- |
+| [前端开发](./FRONTEND.md) | Next.js 前端本地开发与联调 |
+| [开发指南](./DEVELOPMENT.md) | 编码规范、调试、关键架构决策 |
 
 ## 专题
 
-- [背景自定义](./BACKGROUND.md)
+- [背景自定义](./BACKGROUND.md) — 用户自定义主题背景的实现
 
 ## 说明
 
 - Swagger 交互式文档：服务启动后访问 `/api/v1/docs`
 - 若文档与代码行为冲突，以 `src/api/` 与实际接口返回为准
+- 关键架构决策（媒体库策略、配置重启、`.gitignore` 注意点等）见 [DEVELOPMENT.md](./DEVELOPMENT.md#关键架构决策)

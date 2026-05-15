@@ -888,6 +888,70 @@ class ApiClient {
       method: "DELETE",
     });
   }
+
+  // ==================== Announcements ====================
+
+  /** 公开列表：登录页 / 主页等场景可直接调用。 */
+  async getActiveAnnouncements(limit: number = 50) {
+    return this.request<{ announcements: Announcement[]; total: number }>(
+      `/announcements?limit=${limit}`
+    );
+  }
+
+  /** 管理员视角列表，含历史与隐藏条目。 */
+  async adminListAnnouncements(params: {
+    page?: number;
+    per_page?: number;
+    include_invisible?: boolean;
+    include_expired?: boolean;
+  } = {}) {
+    const query = new URLSearchParams();
+    if (params.page) query.set('page', String(params.page));
+    if (params.per_page) query.set('per_page', String(params.per_page));
+    if (params.include_invisible !== undefined) query.set('include_invisible', String(params.include_invisible));
+    if (params.include_expired !== undefined) query.set('include_expired', String(params.include_expired));
+    return this.request<{
+      announcements: Announcement[];
+      total: number;
+      page: number;
+      per_page: number;
+      pages: number;
+    }>(`/admin/announcements?${query.toString()}`);
+  }
+
+  async adminCreateAnnouncement(payload: {
+    title?: string;
+    content: string;
+    level?: 'info' | 'notice' | 'warning' | 'critical';
+    pinned?: boolean;
+    visible?: boolean;
+    expires_at?: number;
+  }) {
+    return this.request<Announcement>(`/admin/announcements`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async adminUpdateAnnouncement(id: number, payload: {
+    title?: string;
+    content?: string;
+    level?: 'info' | 'notice' | 'warning' | 'critical';
+    pinned?: boolean;
+    visible?: boolean;
+    expires_at?: number;
+  }) {
+    return this.request<Announcement>(`/admin/announcements/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async adminDeleteAnnouncement(id: number) {
+    return this.request(`/admin/announcements/${id}`, {
+      method: 'DELETE',
+    });
+  }
 }
 
 export const api = new ApiClient();
@@ -1267,5 +1331,19 @@ export interface ConfigSection {
 
 export interface ConfigSchema {
   sections: ConfigSection[];
+}
+
+
+export interface Announcement {
+  id: number;
+  title: string | null;
+  content: string;
+  level: "info" | "notice" | "warning" | "critical";
+  pinned: boolean;
+  visible: boolean;
+  expires_at: number; // -1 = 永不过期
+  created_at: number;
+  updated_at: number;
+  created_by_uid?: number | null;
 }
 

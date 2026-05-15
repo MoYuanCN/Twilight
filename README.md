@@ -105,7 +105,7 @@ bash ./start_all.sh
 | [安装部署指南](docs/INSTALL.md) | 安装、配置、部署详细步骤 |
 | [后端 API 文档](docs/BACKEND_API.md) | REST API 接口说明 |
 | [API Key 文档](docs/API_KEY_API.md) | 外部系统接入指南 |
-| [前端开发文档](docs/FRONTEND_API.md) | 前端技术栈与开发指南 |
+| [前端开发文档](docs/FRONTEND.md) | 前端技术栈与开发指南 |
 | [开发指南](docs/DEVELOPMENT.md) | 编码规范、调试、贡献流程 |
 
 运行时访问 `/api/v1/docs` 查看 Swagger UI 交互式文档。

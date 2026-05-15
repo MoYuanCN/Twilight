@@ -453,8 +453,25 @@ curl -X POST "http://localhost:5000/api/v1/users/me/emby/unbind" \
 
 `GET /users/me/nsfw`
 
-- 说明：查询当前用户 NSFW 访问状态
+- 说明：查询当前用户的 NSFW 媒体库可见状态（含每个 NSFW 库的独立开关）
 - 认证：登录 Token
+- 响应体：
+
+```json
+{
+  "success": true,
+  "data": {
+    "enabled": true,
+    "has_permission": true,
+    "can_toggle": true,
+    "libraries": [
+      {"name": "里番", "enabled": false},
+      {"name": "无修", "enabled": true}
+    ],
+    "message": "有访问权限，可自行开关"
+  }
+}
+```
 
 - 示例 cURL：
 
@@ -463,17 +480,19 @@ curl -X GET "http://localhost:5000/api/v1/users/me/nsfw" \
   -H "Authorization: Bearer <token>"
 ```
 
-#### 切换 NSFW 权限
+#### 切换 NSFW 库可见性
 
 `PUT /users/me/nsfw`
 
-- 说明：切换当前用户 NSFW 权限
+- 说明：开启/关闭指定 NSFW 媒体库的可见性。未指定 `library_names` 时操作全部 NSFW 库。
+  实际写入由 `apply_library_policy` 走单次 `POST /Users/{Id}/Policy` 完成。
 - 认证：登录 Token
 - 请求体：
 
 ```json
 {
-  "enable": true
+  "enable": false,
+  "library_names": ["里番"]
 }
 ```
 
@@ -483,7 +502,7 @@ curl -X GET "http://localhost:5000/api/v1/users/me/nsfw" \
 curl -X PUT "http://localhost:5000/api/v1/users/me/nsfw" \
   -H "Authorization: Bearer <token>" \
   -H "Content-Type: application/json" \
-  -d '{"enable":true}'
+  -d '{"enable":false,"library_names":["里番"]}'
 ```
 
 ### 6.4 续期与授权码
@@ -1118,16 +1137,45 @@ curl -X POST "http://localhost:5000/api/v1/admin/users/123/kick" \
   -H "Authorization: Bearer <admin_token>"
 ```
 
+#### 获取用户媒体库权限
+
+`GET /admin/users/<int:uid>/libraries`
+
+- 认证：管理员 Token
+- 响应：
+
+```json
+{
+  "all_libraries": [{"id": "xxx", "name": "电影", "type": "movies", "is_nsfw": false}],
+  "enabled_ids": ["xxx", "yyy"],
+  "enable_all": false,
+  "has_emby": true
+}
+```
+
 #### 更新用户媒体库权限
 
 `PUT /admin/users/<int:uid>/libraries`
 
 - 认证：管理员 Token
-- 请求体：
+- 说明：设置用户可访问的媒体库。`enable_all=true` 时用户可见所有库；
+  否则仅 `library_names` / `library_ids` 列出的库可见。
+  写入由 `apply_library_policy` 走单次 `POST /Users/{Id}/Policy` 完成。
+- 请求体（推荐使用 `library_names`）：
 
 ```json
 {
-  "libraries": [1, 2, 3]
+  "library_names": ["电影", "电视剧"],
+  "enable_all": false
+}
+```
+
+或按 ID（GUID）传入：
+
+```json
+{
+  "library_ids": ["f137a2dd-21bb-c1b9-9aa5-c0f6bf02a805"],
+  "enable_all": false
 }
 ```
 
@@ -1137,7 +1185,7 @@ curl -X POST "http://localhost:5000/api/v1/admin/users/123/kick" \
 curl -X PUT "http://localhost:5000/api/v1/admin/users/123/libraries" \
   -H "Authorization: Bearer <admin_token>" \
   -H "Content-Type: application/json" \
-  -d '{"libraries":[1,2,3]}'
+  -d '{"library_names":["电影","电视剧"],"enable_all":false}'
 ```
 
 #### 更新用户 NSFW 权限
@@ -1145,11 +1193,13 @@ curl -X PUT "http://localhost:5000/api/v1/admin/users/123/libraries" \
 `PUT /admin/users/<int:uid>/nsfw`
 
 - 认证：管理员 Token
+- 说明：授予 / 撤销用户访问所有 NSFW 媒体库的权限。
+  撤销时会清空用户偏好集合并隐藏所有 NSFW 库。
 - 请求体：
 
 ```json
 {
-  "enable": true
+  "grant": true
 }
 ```
 
@@ -1159,7 +1209,7 @@ curl -X PUT "http://localhost:5000/api/v1/admin/users/123/libraries" \
 curl -X PUT "http://localhost:5000/api/v1/admin/users/123/nsfw" \
   -H "Authorization: Bearer <admin_token>" \
   -H "Content-Type: application/json" \
-  -d '{"enable":true}'
+  -d '{"grant":true}'
 ```
 
 #### 切换管理员身份
@@ -1540,17 +1590,18 @@ curl -X GET "http://localhost:5000/api/v1/system/admin/config/toml" \
   -H "Authorization: Bearer <admin_token>"
 ```
 
-### 写入 config.toml 并热重载
+### 写入 config.toml（写入后进程自动重启）
 
 `PUT /system/admin/config/toml`
 
-- 说明：写入 config.toml 并热重载
+- 说明：写入 config.toml；保存成功后**进程会自动重启**（依赖 systemd / docker /
+  守护脚本拉起），响应体含 `"restart": true`。请勿在客户端使用旧的"热重载"假设。
 - 认证：管理员 Token
-- 请求体示例：
+- 请求体：
 
 ```json
 {
-  "config": "[Service]..."
+  "content": "[Global]\nlogging = true\n..."
 }
 ```
 
@@ -1560,7 +1611,7 @@ curl -X GET "http://localhost:5000/api/v1/system/admin/config/toml" \
 curl -X PUT "http://localhost:5000/api/v1/system/admin/config/toml" \
   -H "Authorization: Bearer <admin_token>" \
   -H "Content-Type: application/json" \
-  -d '{"config":"[Service]..."}'
+  -d '{"content":"[Global]\nlogging = true\n..."}'
 ```
 
 ### 获取配置 Schema
@@ -1577,11 +1628,11 @@ curl -X GET "http://localhost:5000/api/v1/system/admin/config/schema" \
   -H "Authorization: Bearer <admin_token>"
 ```
 
-### 更新配置并热重载
+### 按 Schema 更新配置
 
 `PUT /system/admin/config/schema`
 
-- 说明：更新配置并热重载
+- 说明：按结构化 schema 写入配置；同样**进程自动重启**生效，依赖外部进程管理器拉起。
 - 认证：管理员 Token
 - 请求体：
 
@@ -1603,6 +1654,36 @@ curl -X PUT "http://localhost:5000/api/v1/system/admin/config/schema" \
   -H "Authorization: Bearer <admin_token>" \
   -H "Content-Type: application/json" \
   -d '{"sections":{"BangumiSync":{"enabled":true,"min_progress_percent":80}}}'
+```
+
+### 测试 Telegram Bot 连通性
+
+`POST /system/admin/bot/test`
+
+- 说明：通过独立 `httpx` 直接调用 Telegram Bot HTTP API（`getMe` + `sendMessage`），
+  不复用全局运行的 Bot 实例，避免跨事件循环异常。
+- 认证：管理员 Token
+- 请求体（可选）：
+
+```json
+{
+  "target": "@my_channel"
+}
+```
+
+不传 `target` 时会发到所有配置的 `Telegram.group_id` / `Telegram.channel_id`。
+
+- 响应示例：
+
+```json
+{
+  "success": true,
+  "message": "测试完成",
+  "data": {
+    "bot": {"id": 12345, "username": "MyBot", "first_name": "My Bot"},
+    "results": [{"target": "@my_channel", "success": true, "error": null}]
+  }
+}
 ```
 
 ### 获取全部路由列表

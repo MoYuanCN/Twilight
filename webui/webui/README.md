@@ -21,5 +21,5 @@ npm run dev
 如果你是首次参与项目，请优先阅读：
 
 - `../../README.md`
-- `../../docs/FRONTEND_API.md`
+- `../../docs/FRONTEND.md`
 - `../../docs/BACKEND_API.md`

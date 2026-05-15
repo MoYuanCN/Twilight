@@ -997,24 +997,23 @@ class EmbyClient:
         disable_names: Optional[List[str]] = None,
         default_enable: bool = True,
     ) -> bool:
-        """根据 Emby 官方 API 设置用户媒体库访问策略。
+        """以 Sakura_embyboss 验证过的策略写入方式同步用户媒体库访问。
 
-        实现遵循 Emby UserPolicy 文档与社区实证（https://emby.media/community/index.php?/topic/130313/）：
+        关键：Emby 的 UserPolicy 字段语义是"两路同时生效"：
+        - ``EnabledFolders``（媒体库 GUID 列表）控制用户能看到哪些库
+        - ``BlockedMediaFolders``（媒体库**名称**列表）显式屏蔽指定库
+        二者必须**同时**正确写入，单独依赖任一字段都可能因 Emby 版本差异、
+        GUID 格式漂移导致用户被锁在"全不可见"或"屏蔽不生效"状态。
 
-        - ``POST /Users/{Id}/Policy`` 是一次性完整替换式写入，不能拆成多步
-        - ``EnableAllFolders=True``：用户可见所有媒体库，``EnabledFolders`` 被忽略
-        - ``EnableAllFolders=False`` + ``EnabledFolders=[Guid 列表]``：用户仅可见列表中的库
-        - ``BlockedMediaFolders`` 与 ``EnabledFolders`` 语义冲突；
-          官方推荐"用 EnabledFolders 精确白名单控制"，不应再发送 BlockedMediaFolders
+        本实现按排除法计算每个媒体库的目标状态，然后**单次** POST UserPolicy：
+        - 在 disable 名单 → 加入 BlockedMediaFolders（按名称）
+        - 在 enable 名单 → 加入 EnabledFolders（按 GUID）
+        - 既不在 enable 也不在 disable 名单 → 按 default_enable 决定：
+          True → 加入 EnabledFolders；False → 既不开启也不屏蔽（隐式禁用）
 
-        本实现根据 enable/disable/default_enable 一次性算出最终的可见库 Guid 集合，
-        然后单次 POST UserPolicy 完成所有改动。
-
-        :param enable_names: 显式开启的媒体库名称列表
-        :param disable_names: 显式关闭的媒体库名称列表
-        :param default_enable: 既不在 enable 也不在 disable 列表中的媒体库的默认状态：
-            - True：开启（用户自助切换 NSFW 等"局部修改"场景，未触及的库保持可见）
-            - False：关闭（管理员严格白名单的"全量限制"场景，未授权的库不可见）
+        :param enable_names: 显式开启的媒体库名称
+        :param disable_names: 显式关闭的媒体库名称
+        :param default_enable: 未指定库的默认行为（True=保持可见，False=不授权）
         """
         enable_set = {n.strip() for n in (enable_names or []) if n and n.strip()}
         disable_set = {n.strip() for n in (disable_names or []) if n and n.strip()}
@@ -1024,23 +1023,24 @@ class EmbyClient:
             logger.warning("apply_library_policy: 未获取到任何媒体库 user=%s", user_id)
             return False
 
-        # 对每个媒体库做"排除法"决策：在禁用列表→不加入；在启用列表→加入；
-        # 既不在禁用也不在启用列表→看 default_enable
-        target_visible_ids: List[str] = []
+        # 排除法逐库决策
+        target_enabled_ids: List[str] = []   # GUID 列表
+        target_blocked_names: List[str] = [] # 库名列表（显式屏蔽）
         for lib in libraries:
             name = (lib.name or '').strip()
             lib_id = (lib.id or '').strip()
-            if not lib_id:
+            if not name or not lib_id:
                 continue
-            if name and name in disable_set:
-                continue
-            if name and name in enable_set:
-                target_visible_ids.append(lib_id)
-                continue
-            if default_enable:
-                target_visible_ids.append(lib_id)
+            if name in disable_set:
+                target_blocked_names.append(name)
+            elif name in enable_set:
+                target_enabled_ids.append(lib_id)
+            elif default_enable:
+                target_enabled_ids.append(lib_id)
+            # else: default_enable=False 且不在 enable 名单 → 隐式禁用
 
-        target_visible_ids = list(dict.fromkeys(target_visible_ids))  # 去重保序
+        target_enabled_ids = list(dict.fromkeys(target_enabled_ids))
+        target_blocked_names = list(dict.fromkeys(target_blocked_names))
 
         # 读取当前完整 policy（保留 EnableContentDeletion / SimultaneousStreamLimit 等其他字段）
         user = await self.get_user(user_id)
@@ -1049,20 +1049,18 @@ class EmbyClient:
             return False
 
         policy = user.policy.copy()
-        all_lib_ids = {(lib.id or '').strip() for lib in libraries if (lib.id or '').strip()}
 
-        if all_lib_ids and set(target_visible_ids) == all_lib_ids:
-            # 覆盖全部库 → 用 EnableAllFolders=True，最简洁、避免 GUID 漂移
-            policy['EnableAllFolders'] = True
-            policy['EnabledFolders'] = []
-        else:
-            # 严格白名单 → EnableAllFolders=False + 完整 GUID 列表
-            policy['EnableAllFolders'] = False
-            policy['EnabledFolders'] = target_visible_ids
+        # 写入媒体库相关三件套（与 Sakura_embyboss 一致）
+        # 始终 EnableAllFolders=False，由 EnabledFolders + BlockedMediaFolders 精确控制
+        policy['EnableAllFolders'] = False
+        policy['EnabledFolders'] = target_enabled_ids
+        policy['BlockedMediaFolders'] = target_blocked_names
 
-        # 遵循 Emby 官方建议，不发送 BlockedMediaFolders（与 EnabledFolders 语义冲突）
-        # 若现有 policy 残留旧值则清空，避免叠加屏蔽
-        policy['BlockedMediaFolders'] = []
+        # DEBUG 日志：把真实写入的 GUID/名称都打印出来，方便排查 Emby 不认 GUID 的情况
+        logger.info(
+            "apply_library_policy POST: user=%s, EnabledFolders=%s, BlockedMediaFolders=%s",
+            user_id, target_enabled_ids, target_blocked_names,
+        )
 
         try:
             await self._request('POST', f'/Users/{user_id}/Policy', json=policy)
@@ -1072,8 +1070,8 @@ class EmbyClient:
             return False
 
         logger.info(
-            "apply_library_policy 完成: user=%s, enable_all=%s, visible=%d/%d",
-            user_id, policy['EnableAllFolders'], len(target_visible_ids), len(all_lib_ids),
+            "apply_library_policy 完成: user=%s, visible=%d, blocked=%d",
+            user_id, len(target_enabled_ids), len(target_blocked_names),
         )
         return True
 

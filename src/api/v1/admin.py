@@ -1404,3 +1404,152 @@ async def cleanup_invalid_users():
         'dry_run': dry_run,
     })
 
+
+# ==================== 公告板管理 ====================
+
+@admin_bp.route('/announcements', methods=['GET'])
+@require_auth
+@require_admin
+async def admin_list_announcements():
+    """获取公告列表（管理员视角，含历史与隐藏条目）。
+
+    Query:
+        page: 页码（默认 1）
+        per_page: 每页条数（默认 20，上限 100）
+        include_invisible: 是否包含已隐藏（默认 true）
+        include_expired: 是否包含已过期（默认 true）
+    """
+    from src.db.announcement import AnnouncementOperate
+    from src.api.v1.announcements import serialize_announcement
+
+    page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('per_page', 20, type=int)
+    include_invisible = (request.args.get('include_invisible', 'true').lower() != 'false')
+    include_expired = (request.args.get('include_expired', 'true').lower() != 'false')
+
+    items, total = await AnnouncementOperate.list_all(
+        include_invisible=include_invisible,
+        include_expired=include_expired,
+        page=page,
+        per_page=per_page,
+    )
+    return api_response(True, f"共 {total} 条公告", {
+        'announcements': [serialize_announcement(it, include_internal=True) for it in items],
+        'total': total,
+        'page': page,
+        'per_page': per_page,
+        'pages': (total + per_page - 1) // per_page if per_page > 0 else 0,
+    })
+
+
+def _validate_announcement_payload(data: dict, require_content: bool = True) -> tuple[bool, str]:
+    title = (data.get('title') or '').strip()
+    content = (data.get('content') or '').strip()
+    level = (data.get('level') or 'info').strip().lower()
+
+    if require_content and not content:
+        return False, "公告内容不能为空"
+    if title and len(title) > 200:
+        return False, "公告标题最多 200 字符"
+    if len(content) > 10000:
+        return False, "公告内容最多 10000 字符"
+    if level and level not in {'info', 'notice', 'warning', 'critical'}:
+        return False, "公告级别仅支持 info / notice / warning / critical"
+    return True, ""
+
+
+@admin_bp.route('/announcements', methods=['POST'])
+@require_auth
+@require_admin
+async def admin_create_announcement():
+    """创建公告。
+
+    Request:
+        {
+            "title": "可选标题",
+            "content": "公告正文（必填，最多 10000 字符）",
+            "level": "info",          // info/notice/warning/critical
+            "pinned": false,
+            "visible": true,
+            "expires_at": -1            // unix 秒；-1 永不过期
+        }
+    """
+    from src.db.announcement import AnnouncementOperate
+    from src.api.v1.announcements import serialize_announcement
+
+    data = request.get_json() or {}
+    ok, msg = _validate_announcement_payload(data, require_content=True)
+    if not ok:
+        return api_response(False, msg, code=400)
+
+    expires_at = data.get('expires_at', -1)
+    try:
+        expires_at = int(expires_at) if expires_at is not None else -1
+    except (TypeError, ValueError):
+        return api_response(False, "expires_at 必须是整数", code=400)
+
+    item = await AnnouncementOperate.create(
+        title=data.get('title'),
+        content=data['content'],
+        level=data.get('level', 'info'),
+        pinned=bool(data.get('pinned', False)),
+        visible=bool(data.get('visible', True)),
+        expires_at=expires_at,
+        created_by_uid=getattr(g.current_user, 'UID', None),
+    )
+    logger.info(f"管理员 {g.current_user.USERNAME} 创建公告 ID={item.ID}")
+    return api_response(True, "公告已创建", serialize_announcement(item, include_internal=True))
+
+
+@admin_bp.route('/announcements/<int:announcement_id>', methods=['PUT'])
+@require_auth
+@require_admin
+async def admin_update_announcement(announcement_id: int):
+    """更新公告（部分字段更新）。"""
+    from src.db.announcement import AnnouncementOperate
+    from src.api.v1.announcements import serialize_announcement
+
+    existing = await AnnouncementOperate.get_by_id(announcement_id)
+    if not existing:
+        return api_response(False, "公告不存在", code=404)
+
+    data = request.get_json() or {}
+    ok, msg = _validate_announcement_payload(data, require_content=False)
+    if not ok:
+        return api_response(False, msg, code=400)
+
+    expires_at = data.get('expires_at', None)
+    if expires_at is not None:
+        try:
+            expires_at = int(expires_at)
+        except (TypeError, ValueError):
+            return api_response(False, "expires_at 必须是整数", code=400)
+
+    item = await AnnouncementOperate.update_fields(
+        announcement_id=announcement_id,
+        title=data.get('title') if 'title' in data else None,
+        content=data.get('content') if 'content' in data else None,
+        level=data.get('level') if 'level' in data else None,
+        pinned=data.get('pinned') if 'pinned' in data else None,
+        visible=data.get('visible') if 'visible' in data else None,
+        expires_at=expires_at,
+    )
+    if not item:
+        return api_response(False, "公告不存在", code=404)
+    logger.info(f"管理员 {g.current_user.USERNAME} 更新公告 ID={announcement_id}")
+    return api_response(True, "公告已更新", serialize_announcement(item, include_internal=True))
+
+
+@admin_bp.route('/announcements/<int:announcement_id>', methods=['DELETE'])
+@require_auth
+@require_admin
+async def admin_delete_announcement(announcement_id: int):
+    """删除公告（不可恢复）。"""
+    from src.db.announcement import AnnouncementOperate
+
+    ok = await AnnouncementOperate.delete(announcement_id)
+    if not ok:
+        return api_response(False, "公告不存在", code=404)
+    logger.info(f"管理员 {g.current_user.USERNAME} 删除公告 ID={announcement_id}")
+    return api_response(True, "公告已删除")
+

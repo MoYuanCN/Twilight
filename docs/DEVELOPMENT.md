@@ -6,6 +6,7 @@
 
 - [开发环境设置](#开发环境设置)
 - [项目结构](#项目结构)
+- [关键架构决策](#关键架构决策)
 - [编码规范](#编码规范)
 - [运行测试](#运行测试)
 - [调试技巧](#调试技巧)
@@ -89,6 +90,63 @@ Twilight/
 - **src/services/** - 业务逻辑层，包含 Emby、Bangumi、调度等服务
 - **src/db/** - 数据库操作层，包含 ORM 模型和数据访问对象
 - **tests/** - 可选测试目录（按需创建与维护）
+
+## 关键架构决策
+
+以下决策是经过线上验证的，**修改前请先与维护者讨论**。
+
+### 1. Emby 媒体库访问策略（`apply_library_policy`）
+
+`src/services/emby.py::EmbyClient.apply_library_policy` 是用户媒体库可见性的**唯一**写入入口。
+所有需要变更媒体库访问的逻辑（用户自助 NSFW 切换、`sync_user_to_emby`、管理员
+`set_user_library_access` / `set_user_nsfw_permission`）都必须通过它。
+
+实现要点：
+
+- 单次 `POST /Users/{Id}/Policy`（替换式写入），**不允许**拆成多步
+- 同时写入 `EnableAllFolders=False` + `EnabledFolders=[GUID 列表]` + `BlockedMediaFolders=[名称列表]`
+  - `EnabledFolders` 取 `/Library/VirtualFolders` 返回项的 `ItemId` / `Guid`
+  - `BlockedMediaFolders` 用库**名称**（不是 GUID）
+  - 两者必须同时正确：依赖任一字段都可能因 Emby 版本差异导致用户被锁
+- 排除法逐库决策：未在 enable/disable 名单的库由 `default_enable` 参数决定
+  - `default_enable=True`：用户自助修改时未触及的库保持可见
+  - `default_enable=False`：管理员严格白名单，未授权的库不可见
+
+参考实现：[Sakura_embyboss](https://github.com/berry8838/Sakura_embyboss) `update_user_enabled_folder`。
+
+### 2. 配置变更走整进程重启（不再热重载）
+
+`src/api/v1/system.py::_schedule_process_restart` 在保存 `config.toml` 后向进程组发 SIGTERM，
+再 `os._exit(0)` 兜底。**禁止**再为 config 改动新增"热重载"逻辑。
+
+部署侧要求：必须由 systemd / docker / `start_backend_prod.sh` 外层守护脚本拉起，否则进程退出后无法自启。
+
+### 3. Bot 连通性测试不复用全局 Bot
+
+`/system/admin/bot/test` 使用独立 `httpx.AsyncClient` 直接调用 Telegram Bot HTTP API，
+**不要**调用 `bot.send_message`——否则会触发跨事件循环异常。
+
+### 4. TG Bot 不展示服务器线路/URL
+
+Emby 面板（`src/bot/handlers/emby_handlers.py`）只保留播放统计 / 密码说明 / 主菜单。
+新增 Bot 功能时不应直接泄露 Emby URL；如需暴露，应引导到网页端。
+
+### 5. `.gitignore` 中 `/db/` 必须有前导斜杠
+
+旧版 `db/` 模式会同时匹配根目录 `db/`（sqlite）与 `src/db/`（Python 包），
+导致新增 `src/db/*.py` 模块（如 `apikey.py`）被静默忽略。
+新增 `src/db/*.py` 后用 `git check-ignore -v <path>` 验证一次。
+
+### 6. 背景图片 URL 验证支持 CSS 包装
+
+`src/api/v1/users.py::_is_valid_background_url` 同时接受：
+- 站内相对路径 `/uploads/...`
+- 裸 `http(s)://` URL
+- `url("...")` / `url('...')` CSS 包装
+- `linear-gradient(...)` / `radial-gradient(...)` / `image-set(...)` 等 CSS 背景函数
+
+前端 `webui/src/app/(main)/layout.tsx::normalizeBgImageValue` 会把裸 URL 包装成 `url("...")`，
+后端必须能识别这种包装形式。
 
 ## 编码规范
 

@@ -12,6 +12,7 @@ import { useAsyncResource } from "@/hooks/use-async-resource";
 import { PageError } from "@/components/layout/page-state";
 import { useAuthStore } from "@/store/auth";
 import { api } from "@/lib/api";
+import { AnnouncementBoard } from "@/components/announcement-board";
 
 const container = {
   hidden: { opacity: 0 },
@@ -132,6 +133,10 @@ export default function DashboardPage() {
           {user?.role_name}
         </Badge>
       </div>
+
+      <motion.div variants={item}>
+        <AnnouncementBoard />
+      </motion.div>
 
       <div className="grid gap-6 md:grid-cols-3">
         <motion.div variants={item} className="premium-card p-6">

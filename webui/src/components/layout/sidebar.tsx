@@ -21,6 +21,7 @@ import {
   FileCode,
   Library,
   Server,
+  Megaphone,
 } from "lucide-react";
 import { useTheme } from "next-themes";
 import { Button } from "@/components/ui/button";
@@ -45,6 +46,7 @@ export const userNavItems: SidebarNavItem[] = [
 
 export const adminNavItems: SidebarNavItem[] = [
   { href: "/admin/users", label: "用户管理", icon: Users },
+  { href: "/admin/announcements", label: "公告管理", icon: Megaphone },
   { href: "/admin/regcodes", label: "注册码", icon: FileText },
   { href: "/admin/requests", label: "求片审核", icon: Film },
   { href: "/admin/telegram-rebind-requests", label: "Telegram 换绑", icon: MessageSquare },
