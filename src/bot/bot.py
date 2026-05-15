@@ -141,7 +141,7 @@ class TelegramBot:
     KNOWN_COMMANDS = {
         "start", "help", "me", "bind", "cancel",
         "admin", "adduser", "regcode", "broadcast", "stats", "userinfo",
-        "emby", "lines", "resetpwd", "playinfo", "sessions", "kick",
+        "emby", "resetpwd", "playinfo", "sessions", "kick",
     }
 
     KNOWN_CALLBACK_EXACT = {
@@ -151,7 +151,7 @@ class TelegramBot:
         "adm_queryuser", "adm_adduser", "adm_banmenu", "adm_regcode_gen",
         "adm_regcode_list", "adm_emby_test", "adm_emby_sessions", "adm_emby_users",
         "adm_emby_cleanup", "adm_emby_cleanup_confirm", "noop", "panel_emby",
-        "emby_lines", "emby_resetpwd", "emby_playinfo",
+        "emby_resetpwd", "emby_playinfo",
     }
 
     KNOWN_CALLBACK_PREFIX = (

@@ -74,7 +74,7 @@ api_error.log
 *.db
 *.sqlite
 *.sqlite3
-db/
+/db/
 database.db
 
 # Uploads and temporary files

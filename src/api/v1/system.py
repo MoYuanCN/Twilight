@@ -23,76 +23,43 @@ import threading
 _reload_logger = logging.getLogger(__name__)
 
 
-def _hot_reload_services():
-    """热重载服务（管理员同步、Bot 和调度器）。
+def _schedule_process_restart(delay: float = 1.5) -> None:
+    """安排整个进程在短暂延迟后退出，由进程管理器/启动脚本负责拉起。
 
-    在请求线程中触发，但跨循环操作放回各服务自己的事件循环执行：
-    - DB 同步：临时新建 loop 即可
-    - Bot：必须用 bot 自己的 loop，否则 application 的 task 会被绑定到错误 loop
+    用主动退出替代旧的"热重载"逻辑，避免跨事件循环、单实例锁残留等问题。
+    要求部署方使用 systemd / docker / 守护脚本等具备自动重启能力的方式拉起进程。
     """
+    import os
+    import signal
+    import time as _time_mod
 
-    def _run_in_new_loop(coro_factory):
-        loop = asyncio.new_event_loop()
+    def _do_exit():
         try:
-            asyncio.set_event_loop(loop)
-            loop.run_until_complete(coro_factory())
-        except Exception as e:
-            _reload_logger.error(f"热重载子任务失败: {e}", exc_info=True)
-        finally:
-            try:
-                loop.run_until_complete(loop.shutdown_asyncgens())
-            except Exception:
-                pass
-            loop.close()
+            _time_mod.sleep(max(0.1, float(delay)))
+        except Exception:
+            _time_mod.sleep(1.5)
 
-    def _do_reload():
-        # 1. 管理员/白名单角色同步：纯 DB，可在任何 loop 上跑
-        _run_in_new_loop(_sync_admin_role_from_config)
+        _reload_logger.warning("🔄 配置已更新，进程即将退出以完成重启 (PID=%s)", os.getpid())
 
-        # 2. Telegram Bot：必须用 Bot 自己的事件循环
+        # 先尝试 SIGTERM 进程组，确保 API + Bot 等同组进程一同退出
         try:
-            from src.bot.bot import get_bot, get_bot_loop, stop_bot, start_bot
+            if hasattr(os, 'killpg') and hasattr(os, 'getpgrp'):
+                os.killpg(os.getpgrp(), signal.SIGTERM)
+                # SIGTERM 后给一点时间让信号传达，再强制退出
+                _time_mod.sleep(2.0)
+        except Exception as exc:
+            _reload_logger.warning("发送进程组 SIGTERM 失败: %s", exc)
 
-            bot = get_bot()
-            bot_loop = get_bot_loop()
-
-            if bot and bot.is_running and bot_loop and bot_loop.is_running():
-                _reload_logger.info("正在重启 Telegram Bot（跨循环调度）...")
-                stop_fut = asyncio.run_coroutine_threadsafe(stop_bot(), bot_loop)
-                stop_fut.result(timeout=30)
-
-                if Config.TELEGRAM_MODE and TelegramConfig.BOT_TOKEN:
-                    start_fut = asyncio.run_coroutine_threadsafe(start_bot(), bot_loop)
-                    start_fut.result(timeout=30)
-                    _reload_logger.info("✅ Telegram Bot 已热重载")
-                else:
-                    _reload_logger.info("⚠️ Bot 已停止（telegram_mode=false 或缺少 token）")
-            elif Config.TELEGRAM_MODE and TelegramConfig.BOT_TOKEN:
-                # Bot 之前没起来：尝试在请求线程的临时 loop 启动一次（最佳努力）
-                _reload_logger.warning(
-                    "Bot 未在专用线程运行，无法热启动；请使用 main.py all 模式或重启进程"
-                )
-        except Exception as e:
-            _reload_logger.error(f"重载 Bot 失败: {e}", exc_info=True)
-
-        # 3. 调度器：APScheduler 在自己内部线程运行；shutdown 后重建即可
+        # 兜底：直接退出当前进程
         try:
-            from src.services.scheduler_service import SchedulerService
+            os._exit(0)
+        except SystemExit:
+            raise
+        except Exception:
+            os._exit(1)
 
-            async def _restart_scheduler():
-                scheduler = SchedulerService.get_scheduler()
-                if scheduler and scheduler.running:
-                    scheduler.shutdown(wait=False)
-                    SchedulerService._scheduler = None
-                await SchedulerService.start()
-
-            _run_in_new_loop(_restart_scheduler)
-            _reload_logger.info("✅ 调度器已热重载")
-        except Exception as e:
-            _reload_logger.error(f"重载调度器失败: {e}", exc_info=True)
-
-    threading.Thread(target=_do_reload, daemon=True, name="twilight-hot-reload").start()
-    _reload_logger.info("🔄 配置已热重载，服务正在后台刷新...")
+    threading.Thread(target=_do_exit, daemon=True, name="twilight-restart").start()
+    _reload_logger.info("🛑 已请求重启整个程序，将在 %.1fs 后退出，请确保由进程管理器拉起", delay)
 
 
 def _parse_csv_ids(value: str) -> set:
@@ -526,12 +493,13 @@ async def update_config_toml():
         SchedulerConfig.update_from_toml('Scheduler')
         NotificationConfig.update_from_toml('Notification')
         BangumiSyncConfig.update_from_toml('BangumiSync')
-        
-        # 热重载服务
-        _hot_reload_services()
-        
-        return api_response(True, "配置已热重载", {
+
+        # 改为重启整个程序（由进程管理器/启动脚本拉起）
+        _schedule_process_restart()
+
+        return api_response(True, "配置已保存，程序将自动重启", {
             'path': str(config_file),
+            'restart': True,
         })
     except Exception as e:
         import logging
@@ -754,8 +722,8 @@ async def update_config_by_schema():
     try:
         with open(config_file, 'w', encoding='utf-8') as f:
             toml.dump(config, f)
-        
-        # 重新加载所有配置
+
+        # 重新加载所有配置（仅供短暂回应使用，实际仍以重启后为准）
         Config.update_from_toml("Global")
         EmbyConfig.update_from_toml('Emby')
         TelegramConfig.update_from_toml('Telegram')
@@ -766,11 +734,11 @@ async def update_config_by_schema():
         SchedulerConfig.update_from_toml('Scheduler')
         NotificationConfig.update_from_toml('Notification')
         BangumiSyncConfig.update_from_toml('BangumiSync')
-        
-        # 热重载服务
-        _hot_reload_services()
-        
-        return api_response(True, "配置已热重载")
+
+        # 改为重启整个程序（由进程管理器/启动脚本拉起）
+        _schedule_process_restart()
+
+        return api_response(True, "配置已保存，程序将自动重启", {'restart': True})
     except Exception as e:
         import logging
         logging.getLogger(__name__).error(f"更新配置文件失败: {e}", exc_info=True)

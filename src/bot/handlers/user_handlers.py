@@ -46,8 +46,9 @@ def register(bot):
                 "",
                 "**🎬 Emby 功能**",
                 "• /emby - 查看 Emby 服务状态",
-                "• /lines - 查看线路信息",
                 "• /playinfo - 查看播放统计",
+                "",
+                "💡 服务器线路请前往网页端查看",
             ]
 
         if admin_mode:

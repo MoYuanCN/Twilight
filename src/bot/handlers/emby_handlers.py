@@ -2,10 +2,9 @@
 Emby 服务 + Inline 面板处理器
 
 /emby - Emby 信息
-/lines - 线路信息
 /playinfo - 播放统计
 
-注意：密码重置等敏感操作已移至网页端
+注意：密码重置等敏感操作已移至网页端；线路/服务地址信息不在 TG Bot 中展示，请前往网页端查看。
 """
 import logging
 
@@ -19,7 +18,6 @@ from src.bot.handlers.common import (
 from src.db.user import UserOperate, Role
 from src.services.emby_service import EmbyService
 from src.services.stats_service import StatsService
-from src.config import EmbyConfig
 
 logger = logging.getLogger(__name__)
 
@@ -48,21 +46,12 @@ def register(bot):
         except Exception:
             status_text = "📊 状态: ❌ 离线"
 
-        text = f"🎬 **Emby 服务中心**\n\n{status_text}\n\n🧭 可使用下方按钮查看线路、统计与密码说明"
+        text = (
+            f"🎬 **Emby 服务中心**\n\n{status_text}\n\n"
+            "🧭 可使用下方按钮查看播放统计与密码说明\n"
+            "🌐 服务器线路请前往网页端查看"
+        )
         await safe_edit_message(query.message, text, reply_markup=_emby_menu_kb())
-
-    # ======================== 线路信息 ========================
-
-    @require_panel
-    @require_subscribe
-    @require_registered
-    async def cb_emby_lines(update: Update, context: ContextTypes.DEFAULT_TYPE, user=None):
-        """线路信息"""
-        query = update.callback_query
-        await answer_callback_safe(query)
-        text = _format_lines_text(user)
-        kb = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 返回", callback_data="panel_emby")]])
-        await safe_edit_message(query.message, text, reply_markup=kb)
 
     # ======================== 重置密码（已禁用，引导到网页端） ========================
 
@@ -130,15 +119,6 @@ def register(bot):
             )
         except Exception:
             text = "🎬 **Emby 服务器**\n\n📊 状态: ❌ 离线"
-        await update.message.reply_text(text, parse_mode="Markdown")
-
-    @require_private
-    @require_panel
-    @require_subscribe
-    @require_registered
-    async def cmd_lines(update: Update, context: ContextTypes.DEFAULT_TYPE, user=None):
-        """线路信息"""
-        text = _format_lines_text(user)
         await update.message.reply_text(text, parse_mode="Markdown")
 
     @require_private
@@ -213,7 +193,6 @@ def register(bot):
 
     # 命令
     app.add_handler(CommandHandler("emby", cmd_emby))
-    app.add_handler(CommandHandler("lines", cmd_lines))
     app.add_handler(CommandHandler("resetpwd", cmd_resetpwd))
     app.add_handler(CommandHandler("playinfo", cmd_playinfo))
     app.add_handler(CommandHandler("sessions", cmd_sessions))
@@ -221,7 +200,6 @@ def register(bot):
 
     # 面板回调
     app.add_handler(CallbackQueryHandler(cb_panel_emby, pattern="^panel_emby$"))
-    app.add_handler(CallbackQueryHandler(cb_emby_lines, pattern="^emby_lines$"))
     app.add_handler(CallbackQueryHandler(cb_emby_resetpwd, pattern="^emby_resetpwd$"))
     app.add_handler(CallbackQueryHandler(cb_emby_playinfo, pattern="^emby_playinfo$"))
 
@@ -229,46 +207,11 @@ def register(bot):
 # ======================== 辅助函数 ========================
 
 def _emby_menu_kb() -> InlineKeyboardMarkup:
-    """Emby 面板键盘"""
+    """Emby 面板键盘（不再展示服务器线路，请在网页端查看）"""
     return InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("🌐 线路信息", callback_data="emby_lines"),
-            InlineKeyboardButton("📊 播放统计", callback_data="emby_playinfo"),
-        ],
+        [InlineKeyboardButton("📊 播放统计", callback_data="emby_playinfo")],
         [InlineKeyboardButton("🔒 密码说明", callback_data="emby_resetpwd")],
         [InlineKeyboardButton("♻️ 主菜单", callback_data="back_start")],
     ])
-
-
-def _parse_line_entry(entry: str) -> tuple:
-    """解析 'Name : URL' 格式的线路条目"""
-    if ' : ' in entry:
-        parts = entry.split(' : ', 1)
-        return parts[0].strip(), parts[1].strip()
-    return '默认线路', entry.strip()
-
-
-def _format_lines_text(user=None) -> str:
-    """格式化线路信息文本，根据用户角色显示不同线路"""
-    lines_list = EmbyConfig.EMBY_URL_LIST
-    if not lines_list:
-        return "⚠️ 暂无可用线路"
-
-    parts = ["🌐 **可用线路**\n"]
-    for i, entry in enumerate(lines_list, 1):
-        name, url = _parse_line_entry(entry)
-        parts.append(f"{i}. **{name}**\n   `{url}`")
-
-    # 白名单/管理员用户显示专属线路
-    if user and hasattr(user, 'ROLE') and user.ROLE in (Role.ADMIN.value, Role.WHITE_LIST.value):
-        wl_list = EmbyConfig.EMBY_URL_LIST_FOR_WHITELIST
-        if wl_list:
-            parts.append("\n⭐ **专属线路**\n")
-            for i, entry in enumerate(wl_list, 1):
-                name, url = _parse_line_entry(entry)
-                parts.append(f"{i}. **{name}**\n   `{url}`")
-
-    parts.append("\n💡 请选择延迟最低的线路使用")
-    return "\n".join(parts)
 
 
