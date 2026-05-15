@@ -24,54 +24,162 @@ _reload_logger = logging.getLogger(__name__)
 
 
 def _hot_reload_services():
-    """热重载服务（Bot 和调度器），在配置更新后调用"""
+    """热重载服务（管理员同步、Bot 和调度器）。
+
+    在请求线程中触发，但跨循环操作放回各服务自己的事件循环执行：
+    - DB 同步：临时新建 loop 即可
+    - Bot：必须用 bot 自己的 loop，否则 application 的 task 会被绑定到错误 loop
+    """
+
+    def _run_in_new_loop(coro_factory):
+        loop = asyncio.new_event_loop()
+        try:
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(coro_factory())
+        except Exception as e:
+            _reload_logger.error(f"热重载子任务失败: {e}", exc_info=True)
+        finally:
+            try:
+                loop.run_until_complete(loop.shutdown_asyncgens())
+            except Exception:
+                pass
+            loop.close()
 
     def _do_reload():
-        loop = None
-        try:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            loop.run_until_complete(_async_reload_services())
-        except Exception as e:
-            _reload_logger.error(f"热重载服务失败: {e}", exc_info=True)
-        finally:
-            if loop:
-                loop.close()
+        # 1. 管理员/白名单角色同步：纯 DB，可在任何 loop 上跑
+        _run_in_new_loop(_sync_admin_role_from_config)
 
-    threading.Thread(target=_do_reload, daemon=True).start()
+        # 2. Telegram Bot：必须用 Bot 自己的事件循环
+        try:
+            from src.bot.bot import get_bot, get_bot_loop, stop_bot, start_bot
+
+            bot = get_bot()
+            bot_loop = get_bot_loop()
+
+            if bot and bot.is_running and bot_loop and bot_loop.is_running():
+                _reload_logger.info("正在重启 Telegram Bot（跨循环调度）...")
+                stop_fut = asyncio.run_coroutine_threadsafe(stop_bot(), bot_loop)
+                stop_fut.result(timeout=30)
+
+                if Config.TELEGRAM_MODE and TelegramConfig.BOT_TOKEN:
+                    start_fut = asyncio.run_coroutine_threadsafe(start_bot(), bot_loop)
+                    start_fut.result(timeout=30)
+                    _reload_logger.info("✅ Telegram Bot 已热重载")
+                else:
+                    _reload_logger.info("⚠️ Bot 已停止（telegram_mode=false 或缺少 token）")
+            elif Config.TELEGRAM_MODE and TelegramConfig.BOT_TOKEN:
+                # Bot 之前没起来：尝试在请求线程的临时 loop 启动一次（最佳努力）
+                _reload_logger.warning(
+                    "Bot 未在专用线程运行，无法热启动；请使用 main.py all 模式或重启进程"
+                )
+        except Exception as e:
+            _reload_logger.error(f"重载 Bot 失败: {e}", exc_info=True)
+
+        # 3. 调度器：APScheduler 在自己内部线程运行；shutdown 后重建即可
+        try:
+            from src.services.scheduler_service import SchedulerService
+
+            async def _restart_scheduler():
+                scheduler = SchedulerService.get_scheduler()
+                if scheduler and scheduler.running:
+                    scheduler.shutdown(wait=False)
+                    SchedulerService._scheduler = None
+                await SchedulerService.start()
+
+            _run_in_new_loop(_restart_scheduler)
+            _reload_logger.info("✅ 调度器已热重载")
+        except Exception as e:
+            _reload_logger.error(f"重载调度器失败: {e}", exc_info=True)
+
+    threading.Thread(target=_do_reload, daemon=True, name="twilight-hot-reload").start()
     _reload_logger.info("🔄 配置已热重载，服务正在后台刷新...")
 
 
-async def _async_reload_services():
-    """异步重载 Bot 和调度器"""
-    # 重载 Bot
-    try:
-        from src.bot.bot import get_bot, stop_bot, start_bot
-        bot = get_bot()
-        if bot and bot.is_running:
-            _reload_logger.info("正在重启 Telegram Bot...")
-            await stop_bot()
-            await start_bot()
-            _reload_logger.info("✅ Telegram Bot 已热重载")
-        elif Config.TELEGRAM_MODE and TelegramConfig.BOT_TOKEN:
-            # 之前未启动但现在配置启用了
-            await start_bot()
-            _reload_logger.info("✅ Telegram Bot 已启动")
-    except Exception as e:
-        _reload_logger.error(f"重载 Bot 失败: {e}", exc_info=True)
+def _parse_csv_ids(value: str) -> set:
+    if not value:
+        return set()
+    out: set = set()
+    for token in str(value).split(','):
+        token = token.strip()
+        if not token:
+            continue
+        try:
+            out.add(int(token))
+        except ValueError:
+            continue
+    return out
 
-    # 重载调度器
-    try:
-        from src.services.scheduler_service import SchedulerService
-        scheduler = SchedulerService.get_scheduler()
-        if scheduler and scheduler.running:
-            _reload_logger.info("正在重启调度器...")
-            scheduler.shutdown(wait=False)
-            SchedulerService._scheduler = None
-            await SchedulerService.start()
-            _reload_logger.info("✅ 调度器已热重载")
-    except Exception as e:
-        _reload_logger.error(f"重载调度器失败: {e}", exc_info=True)
+
+def _parse_csv_names(value: str) -> set:
+    if not value:
+        return set()
+    return {n.strip().lower() for n in str(value).split(',') if n.strip()}
+
+
+async def _sync_admin_role_from_config():
+    """根据 RegisterConfig 中的 admin_uids/admin_usernames/white_list_* 完全同步数据库 ROLE。
+
+    策略：
+    - 加入 admin_uids/admin_usernames 的用户 ROLE → ADMIN
+    - 加入 white_list_uids/white_list_usernames 的用户 ROLE → WHITE_LIST
+    - 当前 ROLE 是 ADMIN/WHITE_LIST 但既不在 admin 也不在 white_list 配置中 → NORMAL
+    - 其它角色（NORMAL / UNRECOGNIZED）不变
+    """
+    from sqlalchemy import select, update
+    from src.db.user import Role, UserModel, UsersSessionFactory
+
+    admin_uids = _parse_csv_ids(RegisterConfig.ADMIN_UIDS)
+    admin_names = _parse_csv_names(RegisterConfig.ADMIN_USERNAMES)
+    white_uids = _parse_csv_ids(RegisterConfig.WHITE_LIST_UIDS)
+    white_names = _parse_csv_names(RegisterConfig.WHITE_LIST_USERNAMES)
+
+    promote_admin: list = []
+    promote_white: list = []
+    demote: list = []
+
+    async with UsersSessionFactory() as session:
+        async with session.begin():
+            result = await session.execute(
+                select(UserModel.UID, UserModel.USERNAME, UserModel.ROLE)
+            )
+            for uid, username, role in result.all():
+                uname = (username or '').lower()
+                is_cfg_admin = uid in admin_uids or (uname and uname in admin_names)
+                is_cfg_white = (
+                    not is_cfg_admin
+                    and (uid in white_uids or (uname and uname in white_names))
+                )
+                if is_cfg_admin:
+                    if role != Role.ADMIN.value:
+                        promote_admin.append(uid)
+                elif is_cfg_white:
+                    if role != Role.WHITE_LIST.value:
+                        promote_white.append(uid)
+                elif role in (Role.ADMIN.value, Role.WHITE_LIST.value):
+                    demote.append(uid)
+
+            if promote_admin:
+                await session.execute(
+                    update(UserModel)
+                    .where(UserModel.UID.in_(promote_admin))
+                    .values(ROLE=Role.ADMIN.value)
+                )
+            if promote_white:
+                await session.execute(
+                    update(UserModel)
+                    .where(UserModel.UID.in_(promote_white))
+                    .values(ROLE=Role.WHITE_LIST.value)
+                )
+            if demote:
+                await session.execute(
+                    update(UserModel)
+                    .where(UserModel.UID.in_(demote))
+                    .values(ROLE=Role.NORMAL.value)
+                )
+
+    _reload_logger.info(
+        f"管理员配置同步完成: 升级 admin={len(promote_admin)}, 升级 white={len(promote_white)}, 降级 normal={len(demote)}"
+    )
 
 
 system_bp = Blueprint('system', __name__, url_prefix='/system')

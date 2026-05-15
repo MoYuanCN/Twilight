@@ -19,8 +19,26 @@
     filter 260ms ease,
     opacity 260ms ease,
     transform 260ms ease,
-    background-position 300ms ease;
+    background-position 300ms ease,
+    background-color 320ms ease;
   will-change: clip-path, filter, opacity, transform;
+}
+
+/* 深色模式切换时，主表面元素一同平滑过渡，避免突变 */
+.section-surface,
+.header-surface,
+.sidebar-surface,
+.profile-card,
+.premium-card,
+.glass-acrylic,
+.glass-frosted,
+.glass-liquid,
+.sidebar-link {
+  transition:
+    background-color 320ms ease,
+    border-color 320ms ease,
+    color 240ms ease,
+    backdrop-filter 320ms ease;
 }
 
 .twilight-bg-wipe {
@@ -96,7 +114,7 @@
       radial-gradient(circle at 12% 8%, var(--shell-glow), transparent 28%),
       radial-gradient(circle at 86% 90%, var(--shell-glow), transparent 25%);
     background-attachment: fixed;
-    transition: background-color 300ms ease, color 300ms ease;
+    transition: background-color 320ms ease, color 240ms ease;
   }
 
   .dark body { color-scheme: dark; }

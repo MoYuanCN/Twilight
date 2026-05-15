@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuthStore } from "@/store/auth";
 import { Sidebar } from "@/components/layout/sidebar";
@@ -12,6 +12,69 @@ import { api } from "@/lib/api";
 import { RegionRefreshKeys } from "@/lib/region-refresh";
 import { useRegionRefresh } from "@/hooks/use-region-refresh";
 
+interface BackgroundConfig {
+  lightBg?: string;
+  darkBg?: string;
+  lightBgImage?: string;
+  darkBgImage?: string;
+  lightFlow?: boolean;
+  darkFlow?: boolean;
+  lightBlur?: number;
+  darkBlur?: number;
+  lightOpacity?: number;
+  darkOpacity?: number;
+}
+
+// 把可能是裸 URL/路径的图片值规范化为合法的 CSS background-image 值
+function normalizeBgImageValue(raw: string): string {
+  const value = (raw || "").trim();
+  if (!value) return "";
+  // 已经是 url(...) / linear-gradient / image-set 等 CSS 函数，直接用
+  if (/^(url|linear-gradient|radial-gradient|conic-gradient|repeating-|image-set)\s*\(/i.test(value)) {
+    return value;
+  }
+  // 显式包含双引号或单引号，按裸 URL 处理
+  const escaped = value.replace(/"/g, '\\"');
+  return `url("${escaped}")`;
+}
+
+function buildBgStyleFromConfig(
+  bgConfig: BackgroundConfig,
+  isDark: boolean,
+): Record<string, string> {
+  const css = (isDark ? bgConfig.darkBg : bgConfig.lightBg) || "";
+  const imgRaw = (isDark ? bgConfig.darkBgImage : bgConfig.lightBgImage) || "";
+  const flow = Boolean(isDark ? bgConfig.darkFlow : bgConfig.lightFlow);
+  const blur = Number((isDark ? bgConfig.darkBlur : bgConfig.lightBlur) ?? 0);
+  const opacity = Number((isDark ? bgConfig.darkOpacity : bgConfig.lightOpacity) ?? 100);
+
+  const img = normalizeBgImageValue(imgRaw);
+  const effective = img || css;
+
+  if (!effective) return {};
+
+  const safeBlur = Number.isFinite(blur) ? Math.min(30, Math.max(0, blur)) : 0;
+  const safeOpacity = Number.isFinite(opacity) ? Math.min(100, Math.max(10, opacity)) : 100;
+
+  const style: Record<string, string> = {
+    backgroundImage: effective,
+    backgroundAttachment: "fixed",
+    backgroundSize: "cover",
+    backgroundPosition: "center",
+    filter: `blur(${safeBlur}px)`,
+    opacity: `${safeOpacity / 100}`,
+    transform: safeBlur > 0 ? "scale(1.04)" : "scale(1)",
+    transformOrigin: "center",
+  };
+
+  if (!img && flow && css.includes("gradient")) {
+    style.backgroundSize = "220% 220%";
+    style.animation = "twilight-gradient-flow 14s ease infinite";
+  }
+
+  return style;
+}
+
 export default function MainLayout({
   children,
 }: {
@@ -20,8 +83,10 @@ export default function MainLayout({
   const router = useRouter();
   const pathname = usePathname();
   const { user, isAuthenticated, isLoading, initialize, fetchUser } = useAuthStore();
-  const { theme } = useTheme();
+  const { resolvedTheme, theme } = useTheme();
+  const activeTheme = resolvedTheme || theme;
   const isAdmin = user?.role === 0;
+  const [bgConfig, setBgConfig] = useState<BackgroundConfig | null>(null);
   const [bgStyle, setBgStyle] = useState<Record<string, string>>({});
   const [nextBgStyle, setNextBgStyle] = useState<Record<string, string> | null>(null);
   const [bgRevealActive, setBgRevealActive] = useState(false);
@@ -70,8 +135,10 @@ export default function MainLayout({
     }, 520);
   }, []);
 
+  // 仅在登录态变化时重新拉取背景配置；主题切换不再触发网络请求
   const loadUserBg = useCallback(async () => {
     if (!isAuthenticated || !user?.uid) {
+      setBgConfig(null);
       applyBackgroundStyle({});
       return;
     }
@@ -79,53 +146,26 @@ export default function MainLayout({
     try {
       const res = await api.getUserBackground(user.uid);
       if (!res.success || !res.data?.background) {
-        setBgStyle({});
+        setBgConfig(null);
+        applyBackgroundStyle({});
         return;
       }
-
-      const bgConfig = JSON.parse(res.data.background);
-      const isDark = theme === "dark";
-      const bgKey = isDark ? "darkBg" : "lightBg";
-      const imgKey = isDark ? "darkBgImage" : "lightBgImage";
-      const flowKey = isDark ? "darkFlow" : "lightFlow";
-      const blurKey = isDark ? "darkBlur" : "lightBlur";
-      const opacityKey = isDark ? "darkOpacity" : "lightOpacity";
-      const css = bgConfig[bgKey] || "";
-      const img = bgConfig[imgKey] || "";
-      const flow = Boolean(bgConfig[flowKey]);
-      const blur = Number(bgConfig[blurKey] ?? 0);
-      const opacity = Number(bgConfig[opacityKey] ?? 100);
-
-      const effectiveBackground = img || css;
-
-      if (effectiveBackground) {
-        const safeBlur = Number.isFinite(blur) ? Math.min(30, Math.max(0, blur)) : 0;
-        const safeOpacity = Number.isFinite(opacity) ? Math.min(100, Math.max(10, opacity)) : 100;
-
-        const nextStyle: Record<string, string> = {
-          backgroundImage: effectiveBackground,
-          backgroundAttachment: "fixed",
-          backgroundSize: "cover",
-          backgroundPosition: "center",
-          filter: `blur(${safeBlur}px)`,
-          opacity: `${safeOpacity / 100}`,
-          transform: safeBlur > 0 ? "scale(1.04)" : "scale(1)",
-          transformOrigin: "center",
-        };
-
-        if (!img && flow && css.includes("gradient")) {
-          nextStyle.backgroundSize = "220% 220%";
-          nextStyle.animation = "twilight-gradient-flow 14s ease infinite";
-        }
-
-        applyBackgroundStyle(nextStyle);
-      } else {
-        applyBackgroundStyle({});
-      }
+      setBgConfig(JSON.parse(res.data.background) as BackgroundConfig);
     } catch {
+      setBgConfig(null);
       applyBackgroundStyle({});
     }
-  }, [applyBackgroundStyle, isAuthenticated, user?.uid, theme]);
+  }, [applyBackgroundStyle, isAuthenticated, user?.uid]);
+
+  // 主题或 bgConfig 变化时，仅纯前端重算样式（不再网络请求）
+  const computedBgStyle = useMemo(() => {
+    if (!bgConfig) return {};
+    return buildBgStyleFromConfig(bgConfig, activeTheme === "dark");
+  }, [bgConfig, activeTheme]);
+
+  useEffect(() => {
+    applyBackgroundStyle(computedBgStyle);
+  }, [computedBgStyle, applyBackgroundStyle]);
 
   useEffect(() => {
     void initialize();

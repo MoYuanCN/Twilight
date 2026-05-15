@@ -41,10 +41,12 @@ import {
 interface ApiKey {
   id: number;
   name: string;
-  key: string;
-  key_full: string;
+  key: string;            // masked, e.g. "key-xxxxxxxx…yyyyyyyy"
+  key_prefix: string;
+  key_suffix: string;
   enabled: boolean;
   allow_query: boolean;
+  permissions?: string[];
   rate_limit: number;
   request_count: number;
   last_used: number | null;
@@ -78,6 +80,8 @@ export default function ApiKeyPage() {
     rate_limit: 100,
   });
 
+  // 创建后展示明文 key（id -> plaintext），用户离开对话框后清空
+  const [revealedKeys, setRevealedKeys] = useState<Record<number, string>>({});
   const [showKeyId, setShowKeyId] = useState<number | null>(null);
 
   const loadApiKeysResource = useCallback(async () => {
@@ -110,6 +114,9 @@ export default function ApiKeyPage() {
       });
       if (res.success && res.data?.key) {
         setGeneratedKey(res.data.key);
+        if (res.data.id) {
+          setRevealedKeys((prev) => ({ ...prev, [res.data!.id]: res.data!.key }));
+        }
         setNewKeyForm({ name: "", normalOps: true, rate_limit: 100 });
         await loadApiKeys();
       } else {
@@ -250,17 +257,28 @@ export default function ApiKeyPage() {
 
                   <div className="flex items-center gap-2">
                     <code className="flex-1 text-xs bg-muted px-3 py-1.5 rounded truncate font-mono">
-                      {showKeyId === apiKey.id ? apiKey.key_full : apiKey.key}
+                      {showKeyId === apiKey.id && revealedKeys[apiKey.id]
+                        ? revealedKeys[apiKey.id]
+                        : apiKey.key}
                     </code>
+                    {revealedKeys[apiKey.id] && (
+                      <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0"
+                        onClick={() => setShowKeyId(showKeyId === apiKey.id ? null : apiKey.id)}
+                        title={showKeyId === apiKey.id ? "隐藏明文" : "显示明文（仅本次会话）"}>
+                        {showKeyId === apiKey.id ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                      </Button>
+                    )}
                     <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0"
-                      onClick={() => setShowKeyId(showKeyId === apiKey.id ? null : apiKey.id)}>
-                      {showKeyId === apiKey.id ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-                    </Button>
-                    <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0"
-                      onClick={() => copyToClipboard(apiKey.key_full)}>
+                      onClick={() => copyToClipboard(revealedKeys[apiKey.id] || apiKey.key)}
+                      title={revealedKeys[apiKey.id] ? "复制明文" : "明文已不可见，仅复制掩码"}>
                       <Copy className="h-3.5 w-3.5" />
                     </Button>
                   </div>
+                  {!revealedKeys[apiKey.id] && (
+                    <p className="text-[10px] text-muted-foreground -mt-1">
+                      明文仅在创建时显示一次，如已遗失请删除后重新创建
+                    </p>
+                  )}
 
                   <div className="flex items-center gap-3 text-xs text-muted-foreground flex-wrap">
                     <span className="flex items-center gap-1">

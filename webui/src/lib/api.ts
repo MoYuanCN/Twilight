@@ -562,6 +562,22 @@ class ApiClient {
     });
   }
 
+  async getUserLibraries(uid: number) {
+    return this.request<{
+      all_libraries: Array<{ id: string; name: string; type: string; is_nsfw: boolean }>;
+      enabled_ids: string[];
+      enable_all: boolean;
+      has_emby: boolean;
+    }>(`/admin/users/${uid}/libraries`);
+  }
+
+  async setUserLibrariesByIds(uid: number, libraryIds: string[], enableAll: boolean = false) {
+    return this.request(`/admin/users/${uid}/libraries`, {
+      method: "PUT",
+      body: JSON.stringify({ library_ids: libraryIds, enable_all: enableAll }),
+    });
+  }
+
   async setUserLibraries(uid: number, libraryNames: string[], enableAll: boolean = false) {
     return this.request(`/admin/users/${uid}/libraries`, {
       method: "PUT",
@@ -927,10 +943,12 @@ export interface UserInfo {
 export interface ApiKeyItem {
   id: number;
   name: string;
-  key: string;
-  key_full: string;
+  key: string;            // masked, e.g. "key-xxxxxxxx…yyyyyyyy"
+  key_prefix: string;
+  key_suffix: string;
   enabled: boolean;
   allow_query: boolean;
+  permissions?: string[];
   rate_limit: number;
   request_count: number;
   last_used: number | null;

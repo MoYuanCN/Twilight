@@ -96,7 +96,6 @@ class BaseConfig:
                 setattr(cls, attr_name, value)
 
     @classmethod
-    @classmethod
     def _serialize_config_value(cls, value: Any) -> Any:
         if isinstance(value, Path):
             try:
@@ -105,6 +104,7 @@ class BaseConfig:
                 return str(value)
         return value
 
+    @classmethod
     def save_to_toml(cls) -> bool:
         """
         将当前配置保存到TOML文件

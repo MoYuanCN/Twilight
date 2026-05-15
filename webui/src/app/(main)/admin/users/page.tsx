@@ -87,6 +87,14 @@ export default function AdminUsersPage() {
     enabled: boolean;
     has_permission: boolean;
   } | null>(null);
+
+  // 媒体库可见性
+  const [libraryAllList, setLibraryAllList] = useState<Array<{ id: string; name: string; type: string; is_nsfw: boolean }>>([]);
+  const [libraryEnabledIds, setLibraryEnabledIds] = useState<Set<string>>(new Set());
+  const [libraryEnableAll, setLibraryEnableAll] = useState(false);
+  const [libraryHasEmby, setLibraryHasEmby] = useState(false);
+  const [libraryLoading, setLibraryLoading] = useState(false);
+  const [librarySaving, setLibrarySaving] = useState(false);
   const usersCacheRef = useRef<
     Map<string, { users: UserInfo[]; total: number; pages: number }>
   >(new Map());
@@ -236,7 +244,13 @@ export default function AdminUsersPage() {
       emby_id: user.emby_id || "",
       active: user.active,
     });
-    
+
+    // 重置媒体库状态
+    setLibraryAllList([]);
+    setLibraryEnabledIds(new Set());
+    setLibraryEnableAll(false);
+    setLibraryHasEmby(false);
+
     // 获取用户的 NSFW 权限信息
     try {
       const res = await api.getUser(user.uid);
@@ -248,10 +262,9 @@ export default function AdminUsersPage() {
             has_permission: nsfw.has_permission || false,
           });
         } else {
-          // 如果是布尔值，说明是列表接口返回的简化数据
           setUserNsfwInfo({
             enabled: nsfw || false,
-            has_permission: false, // 列表接口不包含权限信息
+            has_permission: false,
           });
         }
       }
@@ -259,8 +272,56 @@ export default function AdminUsersPage() {
       console.error("获取用户NSFW信息失败:", error);
       setUserNsfwInfo(null);
     }
-    
+
+    // 获取该用户的媒体库可见性
+    if (user.emby_id) {
+      setLibraryLoading(true);
+      try {
+        const libRes = await api.getUserLibraries(user.uid);
+        if (libRes.success && libRes.data) {
+          setLibraryAllList(libRes.data.all_libraries || []);
+          setLibraryEnabledIds(new Set(libRes.data.enabled_ids || []));
+          setLibraryEnableAll(Boolean(libRes.data.enable_all));
+          setLibraryHasEmby(Boolean(libRes.data.has_emby));
+        }
+      } catch (error) {
+        console.error("获取媒体库可见性失败:", error);
+      } finally {
+        setLibraryLoading(false);
+      }
+    }
+
     setEditOpen(true);
+  };
+
+  const toggleLibraryEnabled = (libraryId: string) => {
+    setLibraryEnabledIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(libraryId)) next.delete(libraryId);
+      else next.add(libraryId);
+      return next;
+    });
+  };
+
+  const handleSaveLibraries = async () => {
+    if (!selectedUser) return;
+    setLibrarySaving(true);
+    try {
+      const res = await api.setUserLibrariesByIds(
+        selectedUser.uid,
+        Array.from(libraryEnabledIds),
+        libraryEnableAll,
+      );
+      if (res.success) {
+        toast({ title: "媒体库可见性已更新", variant: "success" });
+      } else {
+        toast({ title: "更新失败", description: res.message, variant: "destructive" });
+      }
+    } catch (error: any) {
+      toast({ title: "更新失败", description: error.message, variant: "destructive" });
+    } finally {
+      setLibrarySaving(false);
+    }
   };
 
   const handleEdit = async () => {
@@ -726,6 +787,84 @@ export default function AdminUsersPage() {
                         提示: 权限控制访问，显示状态由用户自己在设置中控制
                       </p>
                     </div>
+                  )}
+                </div>
+
+                <Separator />
+
+                {/* 媒体库可见性 */}
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-0.5">
+                      <Label>媒体库可见性</Label>
+                      <p className="text-xs text-muted-foreground">
+                        勾选用户可以看到的媒体库；开启「全部允许」则忽略勾选
+                      </p>
+                    </div>
+                    <Switch
+                      checked={libraryEnableAll}
+                      onCheckedChange={setLibraryEnableAll}
+                      disabled={libraryLoading || librarySaving || !libraryHasEmby}
+                    />
+                  </div>
+
+                  {libraryLoading ? (
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                      正在加载媒体库...
+                    </div>
+                  ) : !libraryHasEmby ? (
+                    <p className="text-xs text-muted-foreground">用户尚未绑定 Emby 账号</p>
+                  ) : libraryAllList.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">没有可见的媒体库</p>
+                  ) : (
+                    <div className={`max-h-48 overflow-y-auto rounded-md border p-2 ${libraryEnableAll ? "opacity-60 pointer-events-none" : ""}`}>
+                      <ul className="space-y-1">
+                        {libraryAllList.map((lib) => {
+                          const checked = libraryEnabledIds.has(lib.id);
+                          return (
+                            <li
+                              key={lib.id}
+                              className="flex items-center justify-between gap-2 rounded px-2 py-1.5 hover:bg-muted/40 cursor-pointer"
+                              onClick={() => toggleLibraryEnabled(lib.id)}
+                            >
+                              <div className="flex items-center gap-2 min-w-0">
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={() => toggleLibraryEnabled(lib.id)}
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="h-4 w-4 rounded"
+                                />
+                                <span className="text-sm truncate">{lib.name}</span>
+                                {lib.is_nsfw && (
+                                  <Badge variant="destructive" className="text-[10px] px-1.5 py-0">
+                                    NSFW
+                                  </Badge>
+                                )}
+                              </div>
+                              <span className="text-[10px] text-muted-foreground shrink-0">
+                                {lib.type || "—"}
+                              </span>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </div>
+                  )}
+
+                  {libraryHasEmby && libraryAllList.length > 0 && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={handleSaveLibraries}
+                      disabled={librarySaving}
+                      className="w-full"
+                    >
+                      {librarySaving && <Loader2 className="mr-2 h-3 w-3 animate-spin" />}
+                      保存媒体库可见性
+                    </Button>
                   )}
                 </div>
               </>

@@ -43,52 +43,65 @@ def _get_user_permissions(user: UserModel) -> List[str]:
 def require_apikey(f: Callable) -> Callable:
     """
     API Key 认证装饰器
-    
-    从请求头中获取 X-API-Key 或 Authorization: Bearer <apikey> 进行认证
+
+    从请求头中获取 X-API-Key 或 Authorization: Bearer <apikey> 进行认证。
+    优先匹配多密钥表 (ApiKeyModel)，回退到旧的 UserModel.APIKEY 单密钥字段。
     """
     @wraps(f)
     async def wrapper(*args, **kwargs):
-        # 从请求头获取 API Key
-        apikey = None
-        
-        # 方式1: X-API-Key header
+        import time as _time
+        from src.db.apikey import ApiKeyOperate
+
         apikey = request.headers.get('X-API-Key')
-        
-        # 方式2: Authorization: Bearer <apikey>
+
         if not apikey:
             auth_header = request.headers.get('Authorization', '')
             if auth_header.startswith('Bearer '):
-                apikey = auth_header[7:]  # 移除 "Bearer " 前缀
+                apikey = auth_header[7:]
             elif auth_header.startswith('ApiKey '):
-                apikey = auth_header[7:]  # 移除 "ApiKey " 前缀
-        
+                apikey = auth_header[7:]
+
         if not apikey:
             return api_response(False, "缺少 API Key，请在请求头中提供 X-API-Key 或 Authorization: Bearer <apikey>", code=401)
-        
-        # 验证 API Key 格式
+
         if not apikey.startswith('key-') or len(apikey) < 20:
             return api_response(False, "API Key 格式无效", code=401)
-        
-        # 获取用户
-        user = await UserOperate.get_user_by_apikey(apikey)
+
+        user = None
+        permissions: List[str] = list(ALL_PERMISSIONS)
+        multi_key = await ApiKeyOperate.get_api_key_by_plaintext(apikey)
+
+        if multi_key:
+            if not multi_key.ENABLED:
+                return api_response(False, "API Key 已禁用", code=403)
+            if multi_key.EXPIRED_AT and multi_key.EXPIRED_AT > 0 and multi_key.EXPIRED_AT < int(_time.time()):
+                return api_response(False, "API Key 已过期", code=403)
+            user = await UserOperate.get_user_by_uid(multi_key.UID)
+            stored_perms = ApiKeyOperate.get_permissions(multi_key)
+            if stored_perms:
+                permissions = [p for p in stored_perms if p in ALL_PERMISSIONS]
+            elif not multi_key.ALLOW_QUERY:
+                permissions = []
+            await ApiKeyOperate.touch_usage(multi_key.ID)
+        else:
+            user = await UserOperate.get_user_by_apikey(apikey)
+            if user:
+                if not user.APIKEY_STATUS:
+                    return api_response(False, "API Key 已禁用", code=403)
+                permissions = _get_user_permissions(user)
+
         if not user:
             return api_response(False, "API Key 无效或已禁用", code=401)
-        
-        # 检查用户状态
+
         if not user.ACTIVE_STATUS:
             return api_response(False, "账户已被禁用", code=403)
-        
-        # 检查 API Key 是否启用
-        if not user.APIKEY_STATUS:
-            return api_response(False, "API Key 已禁用", code=403)
-        
-        # 将用户存储到 g 对象中
+
         g.current_user = user
         g.apikey = apikey
-        g.apikey_permissions = _get_user_permissions(user)
-        
+        g.apikey_permissions = permissions
+
         return await f(*args, **kwargs)
-    
+
     return wrapper
 
 

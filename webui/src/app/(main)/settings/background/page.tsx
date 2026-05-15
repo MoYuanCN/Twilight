@@ -87,9 +87,18 @@ export default function BackgroundSettingsPage() {
     execute: loadBackgroundConfig,
   } = useAsyncResource(loadBackgroundResource, { immediate: true });
 
+  const normalizeBgImage = (raw: string): string => {
+    const value = (raw || "").trim();
+    if (!value) return "";
+    if (/^(url|linear-gradient|radial-gradient|conic-gradient|repeating-|image-set)\s*\(/i.test(value)) {
+      return value;
+    }
+    return `url("${value.replace(/"/g, '\\"')}")`;
+  };
+
   const updatePreview = (css: string, img: string, type: "light" | "dark") => {
-    const combined = img || css;
-    
+    const combined = normalizeBgImage(img) || css;
+
     if (type === "light") {
       setLightPreview(combined);
     } else {

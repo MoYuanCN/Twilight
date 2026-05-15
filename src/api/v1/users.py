@@ -512,26 +512,31 @@ async def bind_emby_account():
     else:
         emby_username = ''
     
-    emby_password = (
-        data.get('emby_password') or 
-        data.get('password') or 
-        data.get('embyPassword') or 
-        ''
-    )
-    if isinstance(emby_password, str):
-        emby_password = emby_password.strip()
+    # 区分"未传字段"和"传了空字符串"——Emby 支持空密码账号
+    raw_password = None
+    for key in ('emby_password', 'password', 'embyPassword'):
+        if key in data:
+            raw_password = data[key]
+            break
+    if isinstance(raw_password, str):
+        emby_password = raw_password
+    elif raw_password is None:
+        emby_password = None
     else:
         emby_password = ''
-    
-    # 调试日志
-    logger.debug(f"绑定 Emby 账号请求: username={emby_username}, password_length={len(emby_password)}, data_keys={list(data.keys())}")
-    
+
+    logger.debug(
+        f"绑定 Emby 账号请求: username={emby_username}, "
+        f"password_provided={emby_password is not None}, "
+        f"password_length={len(emby_password) if emby_password is not None else 0}, "
+        f"data_keys={list(data.keys())}"
+    )
+
     if not emby_username:
         return api_response(False, "请输入 Emby 用户名", code=400)
-    
-    if not emby_password:
-        logger.warning(f"密码为空: data keys={list(data.keys())}, emby_password value={repr(data.get('emby_password'))}, password value={repr(data.get('password'))}")
-        return api_response(False, "请输入 Emby 密码", code=400)
+
+    if emby_password is None:
+        return api_response(False, "请提供 Emby 密码字段（空密码请传空字符串）", code=400)
     
     user = g.current_user
     
@@ -1691,34 +1696,36 @@ async def delete_avatar():
 
 # ==================== API Key 管理 ====================
 
+def _serialize_api_key(model) -> dict:
+    """API Key 列表序列化（不返回明文）。"""
+    from src.db.apikey import ApiKeyOperate
+    masked = f"{model.KEY_PREFIX}…{model.KEY_SUFFIX}" if (model.KEY_PREFIX or model.KEY_SUFFIX) else "****"
+    return {
+        'id': model.ID,
+        'name': model.NAME,
+        'key': masked,            # 仅展示用，明文已不再保留
+        'key_prefix': model.KEY_PREFIX,
+        'key_suffix': model.KEY_SUFFIX,
+        'enabled': model.ENABLED,
+        'allow_query': model.ALLOW_QUERY,
+        'permissions': ApiKeyOperate.get_permissions(model),
+        'rate_limit': model.RATE_LIMIT,
+        'request_count': model.REQUEST_COUNT,
+        'last_used': model.LAST_USED_AT,
+        'created_at': model.CREATED_AT,
+        'expired_at': model.EXPIRED_AT,
+    }
+
+
 @users_bp.route('/me/apikeys', methods=['GET'])
 @require_auth
 async def get_my_api_keys():
-    """获取我的 API Keys 列表"""
+    """获取我的 API Keys 列表（不返回明文，明文仅创建时返回一次）。"""
     from src.db.apikey import ApiKeyOperate
-    
+
     api_keys = await ApiKeyOperate.get_user_api_keys(g.current_user.UID)
-    
-    # 隐藏完整的 key 值，只显示前后几位
-    keys_list = []
-    for key in api_keys:
-        key_str = key.KEY
-        masked_key = f"{key_str[:8]}...{key_str[-8:]}" if len(key_str) > 16 else "****"
-        
-        keys_list.append({
-            'id': key.ID,
-            'name': key.NAME,
-            'key': masked_key,
-            'key_full': key_str,  # 前端需要时返回完整值
-            'enabled': key.ENABLED,
-            'allow_query': key.ALLOW_QUERY,
-            'rate_limit': key.RATE_LIMIT,
-            'request_count': key.REQUEST_COUNT,
-            'last_used': key.LAST_USED_AT,
-            'created_at': key.CREATED_AT,
-            'expired_at': key.EXPIRED_AT,
-        })
-    
+    keys_list = [_serialize_api_key(k) for k in api_keys]
+
     return api_response(True, "获取成功", {
         'keys': keys_list,
         'total': len(keys_list),
@@ -1729,48 +1736,53 @@ async def get_my_api_keys():
 @require_auth
 async def generate_api_key():
     """
-    生成新的 API Key
-    
+    生成新的 API Key（明文仅在响应中返回一次，请妥善保存）
+
     Request:
         {
-            "name": "My API Key",           // 可选，自定义名称
-            "allow_query": true,            // 是否允许查询
-            "rate_limit": 100,              // 速率限制（请求/小时）
-            "expired_at": -1                // 过期时间戳，-1 表示永不过期
+            "name": "My API Key",
+            "allow_query": true,
+            "rate_limit": 100,
+            "expired_at": -1,
+            "permissions": ["account:read"]   // 可选
         }
     """
     from src.db.apikey import ApiKeyOperate
-    
+
     data = request.get_json() or {}
-    
     name = data.get('name')
-    allow_query = data.get('allow_query', True)
+    allow_query = bool(data.get('allow_query', True))
     rate_limit = data.get('rate_limit', 100)
     expired_at = data.get('expired_at', -1)
-    
-    # 验证速率限制
+    permissions = data.get('permissions')
+
+    try:
+        rate_limit = int(rate_limit)
+    except (TypeError, ValueError):
+        return api_response(False, "速率限制必须是整数", code=400)
     if rate_limit < 0:
         return api_response(False, "速率限制不能为负数", code=400)
-    
+
     try:
-        api_key = await ApiKeyOperate.create_api_key(
+        api_key, plaintext = await ApiKeyOperate.create_api_key(
             uid=g.current_user.UID,
             name=name,
             allow_query=allow_query,
             rate_limit=rate_limit,
-            expired_at=expired_at,
+            expired_at=int(expired_at) if expired_at is not None else -1,
+            permissions=permissions if isinstance(permissions, list) else None,
         )
-        
+
         logger.info(f"用户生成 API Key: {g.current_user.USERNAME} -> {api_key.ID}")
-        
-        return api_response(True, "API Key 生成成功", {
+
+        return api_response(True, "API Key 生成成功，请立即保存（明文不会再次显示）", {
             'id': api_key.ID,
-            'key': api_key.KEY,
+            'key': plaintext,
             'name': api_key.NAME,
             'created_at': api_key.CREATED_AT,
         })
     except Exception as e:
-        logger.error(f"生成 API Key 失败: {e}")
+        logger.error(f"生成 API Key 失败: {e}", exc_info=True)
         return api_response(False, "生成失败", code=500)
 
 
@@ -1779,25 +1791,28 @@ async def generate_api_key():
 async def update_api_key(key_id: int):
     """
     更新 API Key 配置
-    
+
     Request:
         {
             "name": "Updated Name",
             "enabled": true,
             "allow_query": true,
             "rate_limit": 100,
-            "expired_at": -1
+            "expired_at": -1,
+            "permissions": ["account:read"]
         }
     """
     from src.db.apikey import ApiKeyOperate
-    
-    # 验证 Key 所有者
+
     api_key = await ApiKeyOperate.get_api_key_by_id(key_id)
     if not api_key or api_key.UID != g.current_user.UID:
         return api_response(False, "API Key 不存在或无权限修改", code=404)
-    
+
     data = request.get_json() or {}
-    
+    perms = data.get('permissions')
+    if perms is not None and not isinstance(perms, list):
+        return api_response(False, "permissions 必须是数组", code=400)
+
     try:
         updated_key = await ApiKeyOperate.update_api_key(
             key_id=key_id,
@@ -1806,43 +1821,33 @@ async def update_api_key(key_id: int):
             allow_query=data.get('allow_query'),
             rate_limit=data.get('rate_limit'),
             expired_at=data.get('expired_at'),
+            permissions=perms,
         )
-        
+
         logger.info(f"用户更新 API Key: {g.current_user.USERNAME} -> {key_id}")
-        
-        return api_response(True, "API Key 更新成功", {
-            'id': updated_key.ID,
-            'name': updated_key.NAME,
-            'enabled': updated_key.ENABLED,
-        })
+
+        return api_response(True, "API Key 更新成功", _serialize_api_key(updated_key))
     except Exception as e:
-        logger.error(f"更新 API Key 失败: {e}")
+        logger.error(f"更新 API Key 失败: {e}", exc_info=True)
         return api_response(False, "更新失败", code=500)
 
 
 @users_bp.route('/me/apikeys/<int:key_id>', methods=['DELETE'])
 @require_auth
 async def delete_api_key(key_id: int):
-    """
-    删除 API Key
-    
-    Warning: 删除后无法恢复，使用此 Key 的应用将失效
-    """
+    """删除 API Key（不可恢复）。"""
     from src.db.apikey import ApiKeyOperate
-    
-    # 验证 Key 所有者
+
     api_key = await ApiKeyOperate.get_api_key_by_id(key_id)
     if not api_key or api_key.UID != g.current_user.UID:
         return api_response(False, "API Key 不存在或无权限删除", code=404)
-    
+
     try:
         success = await ApiKeyOperate.delete_api_key(key_id)
-        
         if success:
             logger.info(f"用户删除 API Key: {g.current_user.USERNAME} -> {key_id}")
             return api_response(True, "API Key 已删除")
-        
         return api_response(False, "删除失败", code=500)
     except Exception as e:
-        logger.error(f"删除 API Key 失败: {e}")
+        logger.error(f"删除 API Key 失败: {e}", exc_info=True)
         return api_response(False, "删除失败", code=500)

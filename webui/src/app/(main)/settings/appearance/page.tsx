@@ -161,8 +161,18 @@ export default function AppearanceSettingsPage() {
     execute: loadAppearanceConfig,
   } = useAsyncResource(loadAppearanceResource, { immediate: true });
 
+  // 把可能是裸 URL 的图片值规范化成合法的 CSS background-image 值
+  const normalizeBgImage = (raw: string): string => {
+    const value = (raw || "").trim();
+    if (!value) return "";
+    if (/^(url|linear-gradient|radial-gradient|conic-gradient|repeating-|image-set)\s*\(/i.test(value)) {
+      return value;
+    }
+    return `url("${value.replace(/"/g, '\\"')}")`;
+  };
+
   const updatePreview = (css: string, img: string, type: "light" | "dark") => {
-    const combined = img || css;
+    const combined = normalizeBgImage(img) || css;
 
     if (type === "light") {
       setLightPreview(combined);

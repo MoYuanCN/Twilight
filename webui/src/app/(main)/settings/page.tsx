@@ -250,22 +250,16 @@ export default function SettingsPage() {
 
   const handleBindEmby = async () => {
     const username = embyUsername.trim();
-    const password = embyPassword.trim();
-    
+    // Emby 允许空密码账号，这里保留原样（不再 trim 密码两端，但用户输入框已限制空白）
+    const password = embyPassword;
+
     if (!username) {
       toast({ title: "请输入 Emby 用户名", variant: "destructive" });
       return;
     }
 
-    if (!password) {
-      toast({ title: "请输入 Emby 密码", variant: "destructive" });
-      return;
-    }
-
     setIsEmbyLoading(true);
     try {
-      // 确保密码被正确传递
-      console.log("绑定 Emby 账号:", { username, passwordLength: password.length });
       const res = await api.bindEmbyAccount(username, password);
       if (res.success) {
         toast({ title: "绑定成功", variant: "success" });
@@ -990,22 +984,22 @@ export default function SettingsPage() {
                 value={embyUsername}
                 onChange={(e) => setEmbyUsername(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter" && embyUsername.trim() && embyPassword.trim()) {
+                  if (e.key === "Enter" && embyUsername.trim()) {
                     handleBindEmby();
                   }
                 }}
               />
             </div>
             <div className="space-y-2">
-              <Label>Emby 密码</Label>
+              <Label>Emby 密码 <span className="text-xs text-muted-foreground">（如账号无密码请留空）</span></Label>
               <div className="relative">
                 <Input
                   type={showEmbyPassword ? "text" : "password"}
-                  placeholder="请输入 Emby 密码"
+                  placeholder="请输入 Emby 密码（可留空）"
                   value={embyPassword}
                   onChange={(e) => setEmbyPassword(e.target.value)}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter" && embyUsername.trim() && embyPassword.trim()) {
+                    if (e.key === "Enter" && embyUsername.trim()) {
                       handleBindEmby();
                     }
                   }}
@@ -1025,13 +1019,13 @@ export default function SettingsPage() {
                 </Button>
               </div>
               <p className="text-xs text-muted-foreground">
-                需要验证您的 Emby 账号凭据才能绑定
+                需要验证您的 Emby 账号凭据才能绑定（无密码账号请留空）
               </p>
             </div>
           </div>
           <DialogFooter>
-            <Button 
-              variant="outline" 
+            <Button
+              variant="outline"
               onClick={() => {
                 setBindEmbyOpen(false);
                 setEmbyUsername("");
@@ -1040,9 +1034,9 @@ export default function SettingsPage() {
             >
               取消
             </Button>
-            <Button 
-              onClick={handleBindEmby} 
-              disabled={isEmbyLoading || !embyUsername.trim() || !embyPassword.trim()}
+            <Button
+              onClick={handleBindEmby}
+              disabled={isEmbyLoading || !embyUsername.trim()}
             >
               {isEmbyLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               确认绑定

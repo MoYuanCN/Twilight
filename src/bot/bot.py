@@ -21,8 +21,19 @@ logger = logging.getLogger(__name__)
 
 # 全局 Bot 实例
 _bot_instance: Optional['TelegramBot'] = None
+_bot_loop: Optional[asyncio.AbstractEventLoop] = None
 _bot_lock_fd: Optional[int] = None
 _bot_lock_path: Optional[Path] = None
+
+
+def get_bot_loop() -> Optional[asyncio.AbstractEventLoop]:
+    """获取 Bot 所在事件循环（供跨线程调度）。"""
+    return _bot_loop
+
+
+def _set_bot_loop(loop: Optional[asyncio.AbstractEventLoop]) -> None:
+    global _bot_loop
+    _bot_loop = loop
 
 
 def _resolve_bot_lock_path() -> Path:
@@ -389,24 +400,31 @@ def get_bot_instance() -> Optional[TelegramBot]:
 async def start_bot() -> Optional[TelegramBot]:
     """启动 Bot"""
     global _bot_instance
-    
+
     if not Config.TELEGRAM_MODE:
         logger.info("Telegram 模式未启用，跳过 Bot 启动")
         return None
-    
-    if _bot_instance is not None:
-        logger.warning("Bot 已在运行")
+
+    if _bot_instance is not None and _bot_instance.is_running:
+        logger.warning("Bot 已在运行，跳过重复启动")
         return _bot_instance
 
+    # 单实例锁：防止多个进程/worker 同时轮询同一 Token
     if not _acquire_bot_lock():
         return None
-    
+
     try:
         _bot_instance = TelegramBot()
         await _bot_instance.start()
+        try:
+            _set_bot_loop(asyncio.get_running_loop())
+        except RuntimeError:
+            _set_bot_loop(None)
         return _bot_instance
     except Exception as e:
-        logger.error(f"启动 Bot 失败: {e}")
+        logger.error(f"启动 Bot 失败: {e}", exc_info=True)
+        _bot_instance = None
+        _set_bot_loop(None)
         _release_bot_lock()
         return None
 
@@ -414,10 +432,14 @@ async def start_bot() -> Optional[TelegramBot]:
 async def stop_bot():
     """停止 Bot"""
     global _bot_instance
-    
+
     if _bot_instance is not None:
-        await _bot_instance.stop()
+        try:
+            await _bot_instance.stop()
+        except Exception as e:
+            logger.warning(f"停止 Bot 时出错（已忽略）: {e}")
         _bot_instance = None
 
+    _set_bot_loop(None)
     _release_bot_lock()
 

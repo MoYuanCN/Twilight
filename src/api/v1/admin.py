@@ -325,6 +325,43 @@ async def kick_user(uid: int):
     return api_response(False, "操作失败")
 
 
+@admin_bp.route('/users/<int:uid>/libraries', methods=['GET'])
+@require_auth
+@require_admin
+async def get_user_libraries(uid: int):
+    """
+    获取用户媒体库访问权限（管理员）
+
+    Response:
+        {
+            "all_libraries": [{"id": "...", "name": "...", "type": "...", "is_nsfw": bool}],
+            "enabled_ids": ["id1", "id2"],
+            "enable_all": false
+        }
+    """
+    user = await UserOperate.get_user_by_uid(uid)
+    if not user:
+        return api_response(False, "用户不存在", code=404)
+
+    if not user.EMBYID:
+        return api_response(True, "用户尚未绑定 Emby", {
+            'all_libraries': [],
+            'enabled_ids': [],
+            'enable_all': False,
+            'has_emby': False,
+        })
+
+    all_libraries = await EmbyService.get_libraries_info()
+    enabled_ids, enable_all = await EmbyService.get_user_library_access(user)
+
+    return api_response(True, "获取成功", {
+        'all_libraries': all_libraries,
+        'enabled_ids': enabled_ids,
+        'enable_all': enable_all,
+        'has_emby': True,
+    })
+
+
 @admin_bp.route('/users/<int:uid>/libraries', methods=['PUT'])
 @require_auth
 @require_admin
