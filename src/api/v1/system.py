@@ -159,10 +159,15 @@ async def _sync_admin_role_from_config():
                     demote.append(uid)
 
             if promote_admin:
+                # 升级为管理员时默认开放所有特殊媒体库访问与编辑权限
                 await session.execute(
                     update(UserModel)
                     .where(UserModel.UID.in_(promote_admin))
-                    .values(ROLE=Role.ADMIN.value)
+                    .values(
+                        ROLE=Role.ADMIN.value,
+                        NSFW_ALLOWED=True,
+                        NSFW=True,
+                    )
                 )
             if promote_white:
                 await session.execute(
@@ -916,10 +921,12 @@ async def update_nsfw_library():
 async def test_bot_connectivity():
     """
     测试 Telegram Bot 连通性
-    
-    向指定的群组/频道发送一条测试消息
+
+    通过独立的 HTTP 请求直接调用 Telegram Bot API，
+    不复用全局运行中的 Bot 实例，避免跨事件循环导致的异常。
     """
     import time
+    import httpx
 
     if not Config.TELEGRAM_MODE:
         return api_response(False, "Telegram 模式未启用", code=400)
@@ -930,53 +937,91 @@ async def test_bot_connectivity():
     data = request.get_json() or {}
     target = data.get('target')  # 可选：指定群组/频道，不传则发送到所有配置的群组和频道
 
-    from src.bot.bot import get_bot
-    bot = get_bot()
-
-    if not bot:
-        return api_response(False, "Bot 实例不存在，请先启用 Telegram 模式并重启服务", code=400)
-
-    if not bot.is_running:
-        return api_response(False, "Bot 未成功启动，请检查 bot_token 配置是否正确", code=400)
-
-    results = []
+    # 解析目标列表
     targets = []
-
     if target:
-        # 指定目标
         targets = [target]
     else:
-        # 发送到所有配置的群组和频道
         group_ids = TelegramConfig.GROUP_ID
         if isinstance(group_ids, (int, str)):
             group_ids = [group_ids] if group_ids else []
         channel_ids = TelegramConfig.CHANNEL_ID
         if isinstance(channel_ids, (int, str)):
             channel_ids = [channel_ids] if channel_ids else []
-        targets = group_ids + channel_ids
+        targets = list(group_ids) + list(channel_ids)
+
+    # 构造 Telegram Bot API 基础地址（兼容自定义代理 API）
+    api_base = (TelegramConfig.TELEGRAM_API_URL or 'https://api.telegram.org/bot').rstrip('/')
+    if api_base.endswith('/bot'):
+        api_url = f"{api_base}{TelegramConfig.BOT_TOKEN}"
+    else:
+        api_url = f"{api_base}/bot{TelegramConfig.BOT_TOKEN}"
+
+    proxy = TelegramConfig.PROXY_URL or None
+    timeout = 15.0
+
+    # 先验证 Token 是否有效（getMe），独立于全局 Bot 线程
+    try:
+        async with httpx.AsyncClient(timeout=timeout, proxy=proxy) as client:
+            resp = await client.get(f"{api_url}/getMe")
+            payload = resp.json() if resp.content else {}
+            if resp.status_code != 200 or not payload.get('ok'):
+                desc = payload.get('description') or f"HTTP {resp.status_code}"
+                return api_response(False, f"Bot Token 验证失败: {desc}", code=400)
+            bot_info = payload.get('result') or {}
+    except Exception as e:
+        return api_response(False, f"无法连接 Telegram Bot API: {e}", code=400)
 
     if not targets:
-        return api_response(False, "没有配置群组或频道，请先在 Telegram 配置中设置 group_id 或 channel_id", code=400)
+        return api_response(True, "Bot Token 有效，但未配置群组或频道，跳过发送测试", {
+            'bot': {
+                'id': bot_info.get('id'),
+                'username': bot_info.get('username'),
+                'first_name': bot_info.get('first_name'),
+            },
+            'results': [],
+        })
 
     test_time = time.strftime('%Y-%m-%d %H:%M:%S')
-    test_text = f"✅ **Twilight Bot 连通性测试**\n\n服务器: {Config.SERVER_NAME}\n时间: {test_time}\n\n此消息用于验证 Bot 与群组/频道的连通性。"
+    test_text = (
+        f"✅ *Twilight Bot 连通性测试*\n\n"
+        f"服务器: {Config.SERVER_NAME}\n"
+        f"时间: {test_time}\n\n"
+        f"此消息用于验证 Bot 与群组/频道的连通性。"
+    )
 
-    for chat_id in targets:
-        try:
-            msg = await bot.send_message(chat_id=chat_id, text=test_text)
-            results.append({
-                'target': str(chat_id),
-                'success': msg is not None,
-                'error': None if msg else '发送失败（未知原因）',
-            })
-        except Exception as e:
-            results.append({
-                'target': str(chat_id),
-                'success': False,
-                'error': str(e),
-            })
+    results = []
+    async with httpx.AsyncClient(timeout=timeout, proxy=proxy) as client:
+        for chat_id in targets:
+            try:
+                resp = await client.post(
+                    f"{api_url}/sendMessage",
+                    json={
+                        'chat_id': chat_id,
+                        'text': test_text,
+                        'parse_mode': 'Markdown',
+                    },
+                )
+                payload = resp.json() if resp.content else {}
+                ok = resp.status_code == 200 and bool(payload.get('ok'))
+                results.append({
+                    'target': str(chat_id),
+                    'success': ok,
+                    'error': None if ok else (payload.get('description') or f"HTTP {resp.status_code}"),
+                })
+            except Exception as e:
+                results.append({
+                    'target': str(chat_id),
+                    'success': False,
+                    'error': str(e),
+                })
 
     all_ok = all(r['success'] for r in results)
     return api_response(all_ok, "测试完成" if all_ok else "部分目标发送失败", {
+        'bot': {
+            'id': bot_info.get('id'),
+            'username': bot_info.get('username'),
+            'first_name': bot_info.get('first_name'),
+        },
         'results': results,
     })
