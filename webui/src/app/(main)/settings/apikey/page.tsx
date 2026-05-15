@@ -13,6 +13,8 @@ import {
   CheckCircle2,
   XCircle,
   Shield,
+  RefreshCw,
+  AlertTriangle,
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -24,7 +26,6 @@ import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
 import { api } from "@/lib/api";
 import { useAsyncResource } from "@/hooks/use-async-resource";
-import { PageError, PageLoading } from "@/components/layout/page-state";
 import {
   Dialog,
   DialogContent,
@@ -86,12 +87,12 @@ export default function ApiKeyPage() {
 
   const loadApiKeysResource = useCallback(async () => {
     const res = await api.getMyApiKeys();
-    if (res.success && res.data?.keys) {
-      setApiKeys(res.data.keys);
-    } else {
+    if (!res.success) {
       throw new Error(res.message || "无法加载 API Keys");
     }
-    return true;
+    const keys = Array.isArray(res.data?.keys) ? (res.data!.keys as ApiKey[]) : [];
+    setApiKeys(keys);
+    return keys;
   }, []);
 
   const {
@@ -122,8 +123,9 @@ export default function ApiKeyPage() {
       } else {
         toast({ title: "创建失败", description: res.message || "无法创建 API Key", variant: "destructive" });
       }
-    } catch {
-      toast({ title: "创建失败", description: "网络错误", variant: "destructive" });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "网络错误";
+      toast({ title: "创建失败", description: msg, variant: "destructive" });
     } finally {
       setIsSaving(false);
     }
@@ -146,8 +148,9 @@ export default function ApiKeyPage() {
       } else {
         toast({ title: "更新失败", description: res.message || "无法更新", variant: "destructive" });
       }
-    } catch {
-      toast({ title: "更新失败", description: "网络错误", variant: "destructive" });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "网络错误";
+      toast({ title: "更新失败", description: msg, variant: "destructive" });
     } finally {
       setIsSaving(false);
     }
@@ -162,17 +165,21 @@ export default function ApiKeyPage() {
         toast({ title: "成功", description: "API Key 已删除" });
         await loadApiKeys();
       } else {
-        toast({ title: "删除失败", description: "无法删除", variant: "destructive" });
+        toast({ title: "删除失败", description: res.message || "无法删除", variant: "destructive" });
       }
-    } catch {
-      toast({ title: "删除失败", description: "网络错误", variant: "destructive" });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "网络错误";
+      toast({ title: "删除失败", description: msg, variant: "destructive" });
     } finally {
       setIsSaving(false);
     }
   };
 
   const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text);
+    navigator.clipboard.writeText(text).catch(() => {
+      toast({ title: "复制失败", description: "浏览器拒绝访问剪贴板", variant: "destructive" });
+      return;
+    });
     toast({ title: "已复制", description: "已复制到剪贴板" });
   };
 
@@ -181,8 +188,9 @@ export default function ApiKeyPage() {
     return new Date(timestamp * 1000).toLocaleString("zh-CN");
   };
 
-  if (error) return <PageError message={error} onRetry={() => void loadApiKeys()} />;
-  if (isLoading) return <PageLoading message="正在加载 API Keys..." />;
+  const handleRefresh = () => {
+    void loadApiKeys();
+  };
 
   return (
     <div className="space-y-6">
@@ -191,10 +199,16 @@ export default function ApiKeyPage() {
           <h1 className="text-2xl font-bold">API Key 管理</h1>
           <p className="text-sm text-muted-foreground">创建和管理 API Keys，用于外部系统调用</p>
         </div>
-        <Button onClick={() => setOpenGenerate(true)} size="sm">
-          <Plus className="h-4 w-4 mr-1" />
-          新建
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={handleRefresh} disabled={isLoading}>
+            <RefreshCw className={`h-4 w-4 mr-1 ${isLoading ? "animate-spin" : ""}`} />
+            刷新
+          </Button>
+          <Button onClick={() => setOpenGenerate(true)} size="sm">
+            <Plus className="h-4 w-4 mr-1" />
+            新建
+          </Button>
+        </div>
       </div>
 
       <Alert className="bg-blue-500/10 border-blue-500/20">
@@ -206,12 +220,34 @@ export default function ApiKeyPage() {
       </Alert>
 
       <div className="space-y-3">
-        {apiKeys.length === 0 ? (
+        {error ? (
+          <Card className="border-destructive/40">
+            <CardContent className="p-6 text-center space-y-3">
+              <AlertTriangle className="h-8 w-8 mx-auto text-destructive" />
+              <p className="text-sm text-foreground font-medium">无法加载 API Keys</p>
+              <p className="text-xs text-muted-foreground break-words">{error}</p>
+              <p className="text-[11px] text-muted-foreground">
+                若后端返回 500，请确认服务端是否包含 <code className="text-[10px]">src/db/apikey.py</code> 并已重启
+              </p>
+              <Button variant="outline" size="sm" onClick={handleRefresh}>
+                <RefreshCw className="h-4 w-4 mr-1" />
+                重试
+              </Button>
+            </CardContent>
+          </Card>
+        ) : isLoading && apiKeys.length === 0 ? (
+          <Card className="border-dashed">
+            <CardContent className="p-8 text-center">
+              <Loader2 className="h-8 w-8 mx-auto animate-spin text-muted-foreground mb-2" />
+              <p className="text-sm text-muted-foreground">正在加载 API Keys...</p>
+            </CardContent>
+          </Card>
+        ) : apiKeys.length === 0 ? (
           <Card className="border-dashed">
             <CardContent className="p-8 text-center">
               <Key className="h-10 w-10 mx-auto text-muted-foreground mb-2 opacity-40" />
               <p className="font-medium">暂无 API Keys</p>
-              <p className="text-xs text-muted-foreground mt-1">点击新建按钮来创建你的第一个 API Key</p>
+              <p className="text-xs text-muted-foreground mt-1">点击右上角"新建"按钮来创建你的第一个 API Key</p>
             </CardContent>
           </Card>
         ) : (
