@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
 import {
   Dialog,
   DialogContent,
@@ -55,6 +56,7 @@ export default function AdminRegcodesPage() {
     useCountLimit: "1",
     count: "1",
   });
+  const [isPermanentDays, setIsPermanentDays] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [createdCodes, setCreatedCodes] = useState<string[]>([]);
 
@@ -86,10 +88,13 @@ export default function AdminRegcodesPage() {
     if (!createOpen) return;
     setCreatedCodes([]);
     if (activeTab === "1") {
+      setIsPermanentDays(false);
       setCreateData({ days: "30", validityTime: "-1", useCountLimit: "1", count: "1" });
     } else if (activeTab === "2") {
+      setIsPermanentDays(false);
       setCreateData({ days: "30", validityTime: "72", useCountLimit: "1", count: "1" });
     } else {
+      setIsPermanentDays(true);
       setCreateData({ days: "-1", validityTime: "-1", useCountLimit: "-1", count: "1" });
     }
   }, [activeTab, createOpen]);
@@ -97,9 +102,12 @@ export default function AdminRegcodesPage() {
   const handleCreate = async () => {
     setIsCreating(true);
     try {
+      const parsedDays = parseInt(createData.days, 10);
+      const normalizedDays = isPermanentDays || Number.isNaN(parsedDays) || parsedDays <= 0 ? -1 : parsedDays;
+
       const res = await api.createRegcode({
         type: parseInt(activeTab),
-        days: parseInt(createData.days),
+        days: normalizedDays,
         validity_time: parseInt(createData.validityTime) || -1,
         use_count_limit: parseInt(createData.useCountLimit) || 1,
         count: parseInt(createData.count) || 1,
@@ -164,7 +172,7 @@ export default function AdminRegcodesPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold">卡码管理</h1>
-          <p className="text-muted-foreground">批量生成注册、续期和白名单授权码</p>
+          <p className="text-muted-foreground">批量生成注册码、续期码和白名单码</p>
         </div>
         <Dialog open={createOpen} onOpenChange={(open) => {
           setCreateOpen(open);
@@ -175,13 +183,13 @@ export default function AdminRegcodesPage() {
           <DialogTrigger asChild>
             <Button variant="default" className="rounded-xl shadow-lg shadow-primary/20">
               <Plus className="mr-2 h-4 w-4" />
-              生成授权码
+              生成卡码
             </Button>
           </DialogTrigger>
           <DialogContent className="max-w-md">
             <DialogHeader>
-              <DialogTitle>生成授权码</DialogTitle>
-              <DialogDescription>请选择授权码类型并配置参数</DialogDescription>
+              <DialogTitle>生成注册码/续期码</DialogTitle>
+              <DialogDescription>请选择卡码类型并配置参数</DialogDescription>
             </DialogHeader>
             
             <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
@@ -193,14 +201,27 @@ export default function AdminRegcodesPage() {
 
               <div className="space-y-4 py-2">
                 <div className="space-y-2">
-                  <Label>{activeTab === "3" ? "授权天数" : "账号天数"}</Label>
+                  <Label>{activeTab === "3" ? "白名单有效天数" : "账号天数"}</Label>
+                  <div className="flex items-center justify-between rounded-md border border-border/80 bg-muted/40 px-3 py-2">
+                    <span className="text-xs text-muted-foreground">设为永久（0 或 -1 都视为永久）</span>
+                    <Switch
+                      checked={isPermanentDays}
+                      onCheckedChange={(checked) => {
+                        setIsPermanentDays(checked);
+                        if (checked) {
+                          setCreateData((prev) => ({ ...prev, days: "-1" }));
+                        }
+                      }}
+                    />
+                  </div>
                   <Input
                     type="number"
                     value={createData.days}
                     onChange={(e) => setCreateData({ ...createData, days: e.target.value })}
+                    disabled={isPermanentDays}
                   />
                   <p className="text-[11px] text-muted-foreground">
-                    {activeTab === "3" ? "白名单用户的有效时长，-1 为永久" : "使用此码后账号增加的有效天数"}
+                    {activeTab === "3" ? "白名单用户的有效时长，0 和 -1 均为永久" : "使用此码后账号增加的有效天数，0 和 -1 均为永久"}
                   </p>
                 </div>
                 
@@ -224,7 +245,7 @@ export default function AdminRegcodesPage() {
                     onChange={(e) => setCreateData({ ...createData, useCountLimit: e.target.value })}
                   />
                   <p className="text-[11px] text-muted-foreground">
-                    该授权码可以被使用的总次数，-1 为无限制
+                    该卡码可以被使用的总次数，-1 为无限制
                   </p>
                 </div>
 
@@ -314,7 +335,7 @@ export default function AdminRegcodesPage() {
                         </div>
                       </td>
                       <td className="px-4 py-3">{getTypeBadge(code.type)}</td>
-                      <td className="px-4 py-3">{code.days} 天</td>
+                      <td className="px-4 py-3">{code.days <= 0 ? "永久" : `${code.days} 天`}</td>
                       <td className="px-4 py-3 text-sm">
                         {code.validity_time === -1 || code.validity_time === undefined 
                           ? '永久有效' 

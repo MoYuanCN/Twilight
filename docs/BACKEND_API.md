@@ -505,7 +505,7 @@ curl -X PUT "http://localhost:5000/api/v1/users/me/nsfw" \
   -d '{"enable":false,"library_names":["里番"]}'
 ```
 
-### 6.4 续期与授权码
+### 6.4 续期与注册码/续期码
 
 #### 管理员续期用户
 
@@ -517,7 +517,9 @@ curl -X PUT "http://localhost:5000/api/v1/users/me/nsfw" \
 
 ```json
 {
-  "reg_code": "code-abc123"
+  "reg_code": "code-abc123",
+  "emby_username": "emby_name",
+  "emby_password": "Password123"
 }
 ```
 

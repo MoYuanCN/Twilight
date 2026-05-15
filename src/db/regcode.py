@@ -58,6 +58,11 @@ class RegCodeOperate:
         day: int = 30
     ) -> Union[str, List[str]]:
         """创建指定数量的注册码并添加到数据库中"""
+        try:
+            parsed_day = int(day)
+        except (TypeError, ValueError):
+            parsed_day = 30
+        day = -1 if parsed_day <= 0 else parsed_day
         codes = []
         async with RegCodeSessionFactory() as session:
             for _ in range(count):

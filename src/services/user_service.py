@@ -13,7 +13,7 @@ from enum import Enum
 from src.config import Config, RegisterConfig
 from src.db.user import UserModel, UserOperate, Role, TelegramRebindRequestOperate
 from src.services.emby import get_emby_client, EmbyError
-from src.core.utils import generate_password, hash_password, timestamp, days_to_seconds
+from src.core.utils import generate_password, hash_password, timestamp, days_to_seconds, is_valid_username
 from src.core.registration_lock import (
     acquire_global_registration_lock,
     acquire_registration_lock,
@@ -51,6 +51,34 @@ class RegisterResponse:
 
 class UserService:
     """用户业务服务"""
+
+    @staticmethod
+    def _normalize_code_days(days: Optional[int], default: int = 30) -> int:
+        """规范化卡码天数：0/-1 都视为永久（-1）。"""
+        try:
+            parsed = int(days) if days is not None else int(default)
+        except (TypeError, ValueError):
+            parsed = int(default)
+        return -1 if parsed <= 0 else parsed
+
+    @staticmethod
+    def _format_days_text(days: int) -> str:
+        return "永久" if days <= 0 else f"{days} 天"
+
+    @staticmethod
+    def _validate_emby_register_password(password: Optional[str]) -> Tuple[bool, str]:
+        """校验 Emby 注册密码强度。"""
+        if password is None:
+            return False, "请提供 Emby 密码"
+        if len(password) < 8:
+            return False, "Emby 密码强度不足：至少 8 位，且包含大小写字母和数字"
+        if not any(ch.islower() for ch in password):
+            return False, "Emby 密码强度不足：至少包含一个小写字母"
+        if not any(ch.isupper() for ch in password):
+            return False, "Emby 密码强度不足：至少包含一个大写字母"
+        if not any(ch.isdigit() for ch in password):
+            return False, "Emby 密码强度不足：至少包含一个数字"
+        return True, ""
 
     @staticmethod
     async def get_registered_user_count(use_cache: bool = True) -> int:
@@ -209,7 +237,7 @@ class UserService:
                 telegram_id=telegram_id,
                 username=username,
                 email=email,
-                days=code_info.DAYS or 30,
+                days=UserService._normalize_code_days(code_info.DAYS, default=30),
                 reg_code=reg_code,
                 password=password
             )
@@ -577,10 +605,14 @@ class UserService:
             if code_info.USE_COUNT_LIMIT != -1 and code_info.USE_COUNT >= code_info.USE_COUNT_LIMIT:
                 return False, "续期码已被使用完"
             
-            days = code_info.DAYS or days
+            days = UserService._normalize_code_days(code_info.DAYS, default=days)
             await RegCodeOperate.update_regcode_use_count(reg_code, 1)
-        
-        await UserOperate.renew_user_expire_time(user, days)
+
+        if days <= 0:
+            user.EXPIRED_AT = -1
+            await UserOperate.update_user(user)
+        else:
+            await UserOperate.renew_user_expire_time(user, days)
         
         # 如果用户被禁用，重新启用
         if not user.ACTIVE_STATUS:
@@ -592,7 +624,9 @@ class UserService:
                 emby = get_emby_client()
                 await emby.set_user_enabled(user.EMBYID, True)
         
-        logger.info(f"用户续期成功: {user.USERNAME} +{days}天")
+        logger.info(f"用户续期成功: {user.USERNAME}, days={days}")
+        if days <= 0:
+            return True, "续期成功！有效期已设置为永久"
         return True, f"续期成功！增加 {days} 天"
 
     @staticmethod
@@ -654,9 +688,14 @@ class UserService:
             return False, f"删除失败: {e}"
 
     @staticmethod
-    async def use_code(user: UserModel, code_str: str) -> Tuple[bool, str, Optional[str]]:
+    async def use_code(
+        user: UserModel,
+        code_str: str,
+        emby_username: Optional[str] = None,
+        emby_password: Optional[str] = None,
+    ) -> Tuple[bool, str, Optional[str]]:
         """
-        已登录用户统一使用授权码（注册码/续期码/白名单码）
+        已登录用户统一使用注册码/续期码/白名单码
         
         - 注册码(TYPE=1)：为无 Emby 账户的用户创建 Emby 账户
         - 续期码(TYPE=2)：续期
@@ -668,19 +707,19 @@ class UserService:
         
         code_info = await RegCodeOperate.get_regcode_by_code(code_str)
         if not code_info:
-            return False, "授权码无效", None
+            return False, "注册码/续期码无效", None
         
         if not code_info.ACTIVE:
-            return False, "授权码已停用", None
+            return False, "注册码/续期码已停用", None
         
         if code_info.USE_COUNT_LIMIT != -1 and code_info.USE_COUNT >= code_info.USE_COUNT_LIMIT:
-            return False, "授权码已被使用完", None
+            return False, "注册码/续期码已被使用完", None
         
         # 检查有效期
         if code_info.VALIDITY_TIME != -1:
             expire_time = code_info.CREATED_TIME + code_info.VALIDITY_TIME * 3600
             if timestamp() > expire_time:
-                return False, "授权码已过期", None
+                return False, "注册码/续期码已过期", None
         
         code_type = code_info.TYPE
         
@@ -693,18 +732,28 @@ class UserService:
         if code_type == RegCodeType.REGISTER.value:
             if user.EMBYID:
                 return False, "您已拥有 Emby 账户，无需使用注册码", None
-            
+
+            emby_username = (emby_username or '').strip()
+            if not emby_username:
+                return False, "使用注册码创建 Emby 账号时，请填写 Emby 用户名", None
+
+            if not is_valid_username(emby_username):
+                return False, "Emby 用户名格式不正确（3-20位字母数字下划线，不能以数字开头）", None
+
+            pwd_ok, pwd_msg = UserService._validate_emby_register_password(emby_password)
+            if not pwd_ok:
+                return False, pwd_msg, None
+
             # 为已有系统账户的用户创建 Emby 账户
             emby = get_emby_client()
-            emby_password = generate_password(12)
-            days = code_info.DAYS or 30
+            days = UserService._normalize_code_days(code_info.DAYS, default=30)
             
             try:
-                existing_emby = await emby.get_user_by_name(user.USERNAME)
+                existing_emby = await emby.get_user_by_name(emby_username)
                 if existing_emby:
-                    return False, "该用户名在 Emby 中已存在", None
+                    return False, "该 Emby 用户名已被占用", None
                 
-                emby_user = await emby.create_user(user.USERNAME, emby_password)
+                emby_user = await emby.create_user(emby_username, emby_password or '')
                 if not emby_user:
                     return False, "创建 Emby 账户失败", None
                 
@@ -713,35 +762,63 @@ class UserService:
                 if user.ROLE in (Role.ADMIN.value, Role.WHITE_LIST.value):
                     user.EXPIRED_AT = 253402214400
                 else:
-                    user.EXPIRED_AT = timestamp() + days_to_seconds(days)
+                    user.EXPIRED_AT = -1 if days <= 0 else (timestamp() + days_to_seconds(days))
+
+                other_data = {}
+                if user.OTHER:
+                    try:
+                        other_data = json.loads(user.OTHER)
+                    except (json.JSONDecodeError, TypeError):
+                        other_data = {}
+                other_data['emby_username'] = emby_username
+                user.OTHER = json.dumps(other_data)
                 await UserOperate.update_user(user)
                 
                 await RegCodeOperate.update_regcode_use_count(code_str, 1)
-                logger.info(f"注册码激活 Emby 账户: {user.USERNAME}")
-                return True, f"Emby 账户创建成功！有效期 {days} 天", emby_password
+                logger.info(f"注册码创建 Emby 账户成功: system={user.USERNAME}, emby={emby_username}")
+                return True, f"Emby 账户创建成功！有效期 {UserService._format_days_text(days)}", None
             except EmbyError as e:
                 logger.error(f"注册码创建 Emby 账户失败: {e}")
                 return False, f"Emby 服务器错误: {e}", None
         
         # ========== 白名单码 ==========
         if code_type == RegCodeType.WHITELIST.value:
-            emby_password = None
+            created_emby_account = False
             
             # 如果没有 Emby 账户，自动创建
             if not user.EMBYID:
+                emby_username = (emby_username or '').strip()
+                if not emby_username:
+                    return False, "使用白名单码创建 Emby 账号时，请填写 Emby 用户名", None
+
+                if not is_valid_username(emby_username):
+                    return False, "Emby 用户名格式不正确（3-20位字母数字下划线，不能以数字开头）", None
+
+                pwd_ok, pwd_msg = UserService._validate_emby_register_password(emby_password)
+                if not pwd_ok:
+                    return False, pwd_msg, None
+
                 emby = get_emby_client()
-                emby_password = generate_password(12)
                 
                 try:
-                    existing_emby = await emby.get_user_by_name(user.USERNAME)
+                    existing_emby = await emby.get_user_by_name(emby_username)
                     if existing_emby:
-                        return False, "该用户名在 Emby 中已存在", None
+                        return False, "该 Emby 用户名已被占用", None
                     
-                    emby_user = await emby.create_user(user.USERNAME, emby_password)
+                    emby_user = await emby.create_user(emby_username, emby_password or '')
                     if not emby_user:
                         return False, "创建 Emby 账户失败", None
                     
                     user.EMBYID = emby_user.id
+                    created_emby_account = True
+                    other_data = {}
+                    if user.OTHER:
+                        try:
+                            other_data = json.loads(user.OTHER)
+                        except (json.JSONDecodeError, TypeError):
+                            other_data = {}
+                    other_data['emby_username'] = emby_username
+                    user.OTHER = json.dumps(other_data)
                 except EmbyError as e:
                     logger.error(f"白名单码创建 Emby 账户失败: {e}")
                     return False, f"Emby 服务器错误: {e}", None
@@ -755,12 +832,12 @@ class UserService:
             await RegCodeOperate.update_regcode_use_count(code_str, 1)
             
             msg = "白名单授权成功！已获得永久有效期"
-            if emby_password:
-                msg += f"，Emby 账户已自动创建"
+            if created_emby_account:
+                msg += "，Emby 账户已创建"
             logger.info(f"白名单码激活: {user.USERNAME}")
-            return True, msg, emby_password
+            return True, msg, None
         
-        return False, "未知的授权码类型", None
+        return False, "未知的注册码/续期码类型", None
 
     @staticmethod
     async def reset_password(user: UserModel) -> Tuple[bool, str, Optional[str]]:
@@ -878,54 +955,42 @@ class UserService:
 
     @staticmethod
     async def toggle_nsfw(user: UserModel, enable: bool, library_names: List[str] = None) -> Tuple[bool, str]:
-        """切换 NSFW 媒体库的可见性（基于 Sakura_embyboss show/hide 增量逻辑）。
+        """切换单个特殊媒体库的可见性（Sakura_embyboss 单库模式）。
 
-        - enable=True 调用 `EmbyClient.show_folders_by_names`
-        - enable=False 调用 `EmbyClient.hide_folders_by_names`
-        - 仅修改目标 NSFW 库的可见性，其他非 NSFW 库保持原样
-        - 同步更新本地 `user.OTHER.nsfw_libraries` 偏好集合
-
-        :param user: 用户对象
-        :param enable: 开启/关闭
-        :param library_names: 指定要操作的 NSFW 库名称；为空时操作全部已配置 NSFW 库
+        系统仅配置一个 NSFW 媒体库，`library_names` 参数仅作兼容保留——
+        无论传不传，操作目标始终是配置的那一个库。
         """
+        _ = library_names  # 仅作前向兼容；单库模式下无需选择
+
         if not user.EMBYID:
             return False, "用户没有关联的 Emby 账户"
 
         if enable and not user.NSFW_ALLOWED:
-            return False, "管理员未授予您访问 NSFW 媒体库的权限"
+            return False, "管理员未授予您访问特殊媒体库的权限"
 
         from src.services.emby_service import EmbyService
 
-        nsfw_map = await EmbyService.find_nsfw_library_ids()  # {name: guid}
-        if not nsfw_map:
-            return False, "系统未配置 NSFW 媒体库"
-
-        # 解析目标库名（大小写不敏感匹配配置项）
-        if library_names:
-            wanted = {n.strip().lower() for n in library_names if (n or '').strip()}
-            target_names = {k for k in nsfw_map.keys() if k.strip().lower() in wanted}
-            if not target_names:
-                return False, "指定的 NSFW 媒体库不存在"
-        else:
-            target_names = set(nsfw_map.keys())
+        nsfw_name = EmbyService.get_nsfw_library_name()
+        if not nsfw_name:
+            return False, "系统未配置特殊媒体库"
 
         emby = get_emby_client()
 
-        # 调用 Sakura 风格的增量策略写入
         try:
             if enable:
-                ok = await emby.show_folders_by_names(user.EMBYID, list(target_names))
+                ok = await emby.show_folders_by_names(user.EMBYID, [nsfw_name])
             else:
-                ok = await emby.hide_folders_by_names(user.EMBYID, list(target_names))
+                ok = await emby.hide_folders_by_names(user.EMBYID, [nsfw_name])
         except Exception as e:
-            logger.error(f"切换 NSFW 库失败: {e}", exc_info=True)
+            logger.error(f"切换特殊媒体库失败: {e}", exc_info=True)
             return False, f"操作失败: {e}"
 
         if not ok:
-            return False, "更新 Emby NSFW 库权限失败"
+            return False, "更新 Emby 特殊媒体库权限失败"
 
-        # 同步更新 DB 中的偏好集合（仅保留仍在配置中的 NSFW 库名）
+        # 同步更新本地状态（NSFW 主开关）
+        user.NSFW = bool(enable)
+        # OTHER.nsfw_libraries 仅保留当前单库，便于历史兼容
         other_data: dict = {}
         if user.OTHER:
             try:
@@ -934,47 +999,32 @@ class UserService:
                     other_data = {}
             except (json.JSONDecodeError, TypeError):
                 other_data = {}
-
-        prev_enabled = set(other_data.get('nsfw_libraries') or [])
-        if enable:
-            enabled_nsfw = (prev_enabled | target_names) & set(nsfw_map.keys())
-        else:
-            enabled_nsfw = (prev_enabled - target_names) & set(nsfw_map.keys())
-
-        other_data['nsfw_libraries'] = sorted(enabled_nsfw)
+        other_data['nsfw_libraries'] = [nsfw_name] if enable else []
         user.OTHER = json.dumps(other_data)
-        user.NSFW = len(enabled_nsfw) > 0
         await UserOperate.update_user(user)
 
         status = "开启" if enable else "关闭"
-        lib_str = ", ".join(sorted(target_names))
-        return True, f"NSFW 库 [{lib_str}] 已{status}，已同步到 Emby"
+        return True, f"特殊媒体库「{nsfw_name}」已{status}，已同步到 Emby"
 
     @staticmethod
     async def get_user_nsfw_preferences(user: UserModel) -> List[str]:
-        """获取用户已启用的 NSFW 库名称列表"""
-        import json
-        if user.OTHER:
-            try:
-                other_data = json.loads(user.OTHER)
-                return other_data.get('nsfw_libraries', [])
-            except (json.JSONDecodeError, TypeError):
-                pass
-        # 兼容旧的布尔 NSFW 字段
-        if user.NSFW:
-            from src.services.emby_service import EmbyService
-            return EmbyService.get_nsfw_library_names()
+        """获取用户已启用的特殊媒体库名称（单库模式下最多 1 项）。"""
+        from src.services.emby_service import EmbyService
+
+        nsfw_name = EmbyService.get_nsfw_library_name()
+        if not nsfw_name:
+            return []
+        if user.NSFW_ALLOWED and user.NSFW:
+            return [nsfw_name]
         return []
 
     @staticmethod
     async def sync_user_to_emby(user: UserModel) -> Tuple[bool, str]:
-        """同步用户状态到 Emby（基于 Sakura_embyboss 增量 show/hide 模式）。
+        """同步用户状态到 Emby（单特殊库模式 + Sakura show/hide）。
 
-        - 同步 ACTIVE_STATUS（启用/禁用账户）
-        - 对每个已配置的 NSFW 媒体库，按 `user.NSFW_ALLOWED` + 偏好集合决定 show 或 hide：
-          * NSFW_ALLOWED=False 或 NSFW=False → 全部 NSFW 库 hide
-          * 否则按 OTHER.nsfw_libraries 偏好显隐
-        - 非 NSFW 库不会被本方法触碰，保持现有可见性
+        - 同步 ACTIVE_STATUS
+        - 单个 NSFW 库：如果 NSFW_ALLOWED 且 NSFW=True → show；否则 → hide
+        - 不触碰其他媒体库
         """
         if not user.EMBYID:
             return True, "用户未绑定 Emby 账户，跳过同步"
@@ -987,48 +1037,23 @@ class UserService:
             # 1. 启用/禁用账户
             await emby.set_user_enabled(user.EMBYID, user.ACTIVE_STATUS)
 
-            # 2. 同步 NSFW 媒体库可见性
-            nsfw_map = await EmbyService.find_nsfw_library_ids()  # {name: guid}
-            if nsfw_map:
-                all_nsfw = set(nsfw_map.keys())
-
-                # 解析用户偏好（已选择显示的 NSFW 库名）
-                preferred: set[str] = set()
-                if user.OTHER:
-                    try:
-                        other_data = json.loads(user.OTHER)
-                        for name in (other_data.get('nsfw_libraries') or []):
-                            if isinstance(name, str) and name.strip():
-                                preferred.add(name.strip())
-                    except (json.JSONDecodeError, TypeError):
-                        preferred = set()
-                preferred &= all_nsfw
-
-                if not user.NSFW_ALLOWED or not user.NSFW:
-                    # 没权限或主开关关 → 隐藏全部 NSFW
-                    show_names: list[str] = []
-                    hide_names = sorted(all_nsfw)
+            # 2. 同步特殊媒体库可见性
+            nsfw_name = EmbyService.get_nsfw_library_name()
+            if nsfw_name:
+                should_show = bool(user.NSFW_ALLOWED) and bool(user.NSFW)
+                if should_show:
+                    await emby.show_folders_by_names(user.EMBYID, [nsfw_name])
                 else:
-                    # 兼容旧记录：NSFW=True 但偏好为空 → 视为全部开启
-                    if not preferred:
-                        preferred = set(all_nsfw)
-                    show_names = sorted(preferred)
-                    hide_names = sorted(all_nsfw - preferred)
-
-                if hide_names:
-                    await emby.hide_folders_by_names(user.EMBYID, hide_names)
-                if show_names:
-                    await emby.show_folders_by_names(user.EMBYID, show_names)
-
+                    await emby.hide_folders_by_names(user.EMBYID, [nsfw_name])
                 logger.info(
                     f"用户状态已同步到 Emby: {user.USERNAME} (UID: {user.UID}), "
                     f"状态: {'启用' if user.ACTIVE_STATUS else '禁用'}, "
-                    f"NSFW 显示: {show_names or '无'}, 隐藏: {hide_names or '无'}"
+                    f"特殊库「{nsfw_name}」: {'显示' if should_show else '隐藏'}"
                 )
             else:
                 logger.info(
                     f"用户状态已同步到 Emby: {user.USERNAME} (UID: {user.UID}), "
-                    f"状态: {'启用' if user.ACTIVE_STATUS else '禁用'}, NSFW 库未配置"
+                    f"状态: {'启用' if user.ACTIVE_STATUS else '禁用'}, 特殊媒体库未配置"
                 )
 
             return True, "同步成功"

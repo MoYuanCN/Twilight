@@ -334,10 +334,10 @@ class ApiClient {
     return this.request<{ lines: Array<{ name: string; url: string }>; whitelist_lines?: Array<{ name: string; url: string }> }>(`/system/emby-urls`);
   }
 
-  async toggleNsfw(enable: boolean, libraryNames?: string[]) {
+  async toggleNsfw(enable: boolean) {
     return this.request("/users/me/nsfw", {
       method: "PUT",
-      body: JSON.stringify({ enable, library_names: libraryNames }),
+      body: JSON.stringify({ enable }),
     });
   }
 
@@ -355,7 +355,15 @@ class ApiClient {
     });
   }
 
-  async useCode(regCode: string) {
+  async useCode(regCode: string, options?: { embyUsername?: string; embyPassword?: string }) {
+    const payload: Record<string, string> = { reg_code: regCode };
+    if (options?.embyUsername) {
+      payload.emby_username = options.embyUsername;
+    }
+    if (typeof options?.embyPassword === "string") {
+      payload.emby_password = options.embyPassword;
+    }
+
     return this.request<{
       emby_password?: string;
       expire_status: string;
@@ -364,7 +372,7 @@ class ApiClient {
       role_name: string;
     }>("/users/me/use-code", {
       method: "POST",
-      body: JSON.stringify({ reg_code: regCode }),
+      body: JSON.stringify(payload),
     });
   }
 
@@ -555,11 +563,17 @@ class ApiClient {
     return this.request<Array<{ id: string; name: string; type: string; is_nsfw: boolean }>>("/system/admin/emby/libraries");
   }
 
-  async updateNsfwLibraries(libraryNames: string[]) {
-    return this.request<{ nsfw_library_names: string[] }>("/system/admin/emby/nsfw", {
+  /** 设置唯一的特殊媒体库（传空字符串清空）。 */
+  async updateNsfwLibrary(libraryName: string) {
+    return this.request<{ nsfw_library_name: string }>("/system/admin/emby/nsfw", {
       method: "PUT",
-      body: JSON.stringify({ library_names: libraryNames }),
+      body: JSON.stringify({ library_name: libraryName }),
     });
+  }
+
+  /** 兼容旧调用：仅会使用数组中的第一项作为唯一特殊媒体库。 */
+  async updateNsfwLibraries(libraryNames: string[]) {
+    return this.updateNsfwLibrary(libraryNames[0] || "");
   }
 
   async getUserLibraries(uid: number) {
@@ -1083,7 +1097,8 @@ export interface NsfwStatus {
   enabled: boolean;
   has_permission: boolean;
   can_toggle: boolean;
-  libraries: Array<{ name: string; enabled: boolean }>;
+  /** 单库模式：当前特殊媒体库；未配置时为 null */
+  library: { name: string; enabled: boolean } | null;
   message: string;
 }
 

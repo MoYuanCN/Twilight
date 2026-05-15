@@ -346,7 +346,8 @@ def register(bot):
             result = [result]
         codes = [f"`{c}`" for c in result]
 
-        text = f"✅ **生成 {count} 个注册码** ({days}天)\n\n" + "\n".join(codes)
+        days_text = "永久" if days <= 0 else f"{days}天"
+        text = f"✅ **生成 {count} 个注册码** ({days_text})\n\n" + "\n".join(codes)
         kb = InlineKeyboardMarkup([
             [InlineKeyboardButton("🔁 再生成", callback_data="adm_regcode_gen")],
             [InlineKeyboardButton("🔙 返回", callback_data="admin_regcode")],
@@ -365,7 +366,8 @@ def register(bot):
         else:
             lines = [f"🎫 **可用注册码** ({len(codes)} 个)\n"]
             for c in codes[:15]:
-                lines.append(f"• `{c.CODE}` - {c.DAYS}天")
+                line_days_text = "永久" if (c.DAYS is not None and int(c.DAYS) <= 0) else f"{c.DAYS}天"
+                lines.append(f"• `{c.CODE}` - {line_days_text}")
             if len(codes) > 15:
                 lines.append(f"\n... 还有 {len(codes) - 15} 个")
             text = "\n".join(lines)
@@ -727,7 +729,8 @@ def register(bot):
             result = await RegCodeOperate.create_regcode(vali_time=-1, type_=1, day=days, count=count)
             if isinstance(result, str):
                 result = [result]
-            codes = [f"`{c}` ({days}天)" for c in result]
+            days_text = "永久" if days <= 0 else f"{days}天"
+            codes = [f"`{c}` ({days_text})" for c in result]
             await update.message.reply_text(f"✅ 生成 {count} 个注册码\n\n" + "\n".join(codes), parse_mode="Markdown")
         elif action == "list":
             all_codes = await RegCodeOperate.get_all_regcodes()
@@ -737,7 +740,8 @@ def register(bot):
             else:
                 lines = [f"🎫 **可用注册码** ({len(codes)}个)\n"]
                 for c in codes[:20]:
-                    lines.append(f"• `{c.CODE}` - {c.DAYS}天")
+                    line_days_text = "永久" if (c.DAYS is not None and int(c.DAYS) <= 0) else f"{c.DAYS}天"
+                    lines.append(f"• `{c.CODE}` - {line_days_text}")
                 await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
     @require_private

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import {
   User,
@@ -110,6 +110,126 @@ export default function SettingsPage() {
   const [embyLines, setEmbyLines] = useState<Array<{ name: string; url: string }>>([]);
   const [whitelistLines, setWhitelistLines] = useState<Array<{ name: string; url: string }>>([]);
   const [copiedIndex, setCopiedIndex] = useState<string | null>(null);
+  const [lineLatencyMap, setLineLatencyMap] = useState<Record<string, { status: "idle" | "testing" | "ok" | "timeout" | "error"; latencyMs?: number }>>({});
+  const [isLatencyTesting, setIsLatencyTesting] = useState(false);
+
+  const makeLineKey = useCallback((scope: "line" | "wl", index: number, url: string) => `${scope}:${index}:${url}`, []);
+
+  const embyLineItems = useMemo(
+    () => embyLines.map((line, index) => ({ line, index, key: makeLineKey("line", index, line.url) })),
+    [embyLines, makeLineKey]
+  );
+
+  const whitelistLineItems = useMemo(
+    () => whitelistLines.map((line, index) => ({ line, index, key: makeLineKey("wl", index, line.url) })),
+    [whitelistLines, makeLineKey]
+  );
+
+  const getLatencyRank = useCallback((key: string) => {
+    const info = lineLatencyMap[key];
+    if (!info) return 8_000_000;
+    if (info.status === "ok") return info.latencyMs ?? 8_000_000;
+    if (info.status === "testing") return 9_000_000;
+    if (info.status === "timeout") return 10_000_000;
+    if (info.status === "error") return 11_000_000;
+    return 12_000_000;
+  }, [lineLatencyMap]);
+
+  const sortedEmbyLineItems = useMemo(
+    () => [...embyLineItems].sort((a, b) => getLatencyRank(a.key) - getLatencyRank(b.key)),
+    [embyLineItems, getLatencyRank]
+  );
+
+  const sortedWhitelistLineItems = useMemo(
+    () => [...whitelistLineItems].sort((a, b) => getLatencyRank(a.key) - getLatencyRank(b.key)),
+    [whitelistLineItems, getLatencyRank]
+  );
+
+  const renderLatencyText = (key: string) => {
+    const info = lineLatencyMap[key];
+    if (!info || info.status === "idle") return "待测速";
+    if (info.status === "testing") return "测速中...";
+    if (info.status === "ok") return `${info.latencyMs} ms`;
+    if (info.status === "timeout") return "超时";
+    return "不可达";
+  };
+
+  const renderLatencyClassName = (key: string) => {
+    const info = lineLatencyMap[key];
+    if (!info || info.status === "idle" || info.status === "testing") {
+      return "text-xs text-muted-foreground";
+    }
+    if (info.status === "ok") {
+      if ((info.latencyMs ?? 0) <= 150) return "text-xs text-emerald-600";
+      if ((info.latencyMs ?? 0) <= 400) return "text-xs text-amber-600";
+      return "text-xs text-orange-600";
+    }
+    return "text-xs text-destructive";
+  };
+
+  const testSingleLineLatency = useCallback(async (rawUrl: string) => {
+    const url = rawUrl.trim();
+    if (!url) {
+      return { status: "error" as const };
+    }
+
+    const normalizedUrl = /^https?:\/\//i.test(url) ? url : `https://${url.replace(/^\/+/, "")}`;
+    const probeUrl = `${normalizedUrl}${normalizedUrl.includes("?") ? "&" : "?"}tw_ping=${Date.now()}`;
+
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 8000);
+    const startedAt = performance.now();
+
+    try {
+      await fetch(probeUrl, {
+        method: "GET",
+        mode: "no-cors",
+        cache: "no-store",
+        signal: controller.signal,
+      });
+      return {
+        status: "ok" as const,
+        latencyMs: Math.max(1, Math.round(performance.now() - startedAt)),
+      };
+    } catch (error: any) {
+      if (error?.name === "AbortError") {
+        return { status: "timeout" as const };
+      }
+      return { status: "error" as const };
+    } finally {
+      window.clearTimeout(timeout);
+    }
+  }, []);
+
+  const runLineLatencyTests = useCallback(async () => {
+    const allItems = [...embyLineItems, ...whitelistLineItems];
+    if (allItems.length === 0) {
+      setLineLatencyMap({});
+      return;
+    }
+
+    setIsLatencyTesting(true);
+    setLineLatencyMap((prev) => {
+      const next = { ...prev };
+      for (const item of allItems) {
+        next[item.key] = { status: "testing" };
+      }
+      return next;
+    });
+
+    const entries = await Promise.all(
+      allItems.map(async (item) => [item.key, await testSingleLineLatency(item.line.url)] as const)
+    );
+
+    setLineLatencyMap((prev) => {
+      const next = { ...prev };
+      for (const [key, result] of entries) {
+        next[key] = result;
+      }
+      return next;
+    });
+    setIsLatencyTesting(false);
+  }, [embyLineItems, whitelistLineItems, testSingleLineLatency]);
 
   const loadSettingsResource = useCallback(async () => {
     const [settingsRes, tgRes, nsfwRes] = await Promise.all([
@@ -168,15 +288,21 @@ export default function SettingsPage() {
 
   const handleToggleNsfwLibrary = async (libraryName: string, enabled: boolean) => {
     try {
-      const res = await api.toggleNsfw(enabled, [libraryName]);
+      const res = await api.toggleNsfw(enabled);
       if (res.success) {
         setNsfwStatus((prev) => {
           if (!prev) return null;
-          const updatedLibraries = prev.libraries.map((lib) =>
-            lib.name === libraryName ? { ...lib, enabled } : lib
-          );
-          const anyEnabled = updatedLibraries.some((lib) => lib.enabled);
-          return { ...prev, enabled: anyEnabled, libraries: updatedLibraries };
+          if (!prev.library || prev.library.name !== libraryName) {
+            return { ...prev, enabled };
+          }
+          return {
+            ...prev,
+            enabled,
+            library: {
+              ...prev.library,
+              enabled,
+            },
+          };
         });
         toast({
           title: enabled ? `已开启「${libraryName}」` : `已关闭「${libraryName}」`,
@@ -402,6 +528,10 @@ export default function SettingsPage() {
       }
     });
   }, []);
+
+  useEffect(() => {
+    void runLineLatencyTests();
+  }, [runLineLatencyTests]);
 
   if (error) {
     return <PageError message={error} onRetry={() => void loadData()} />;
@@ -764,10 +894,16 @@ export default function SettingsPage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            {embyLines.length > 0 ? (
+            <div className="flex justify-end">
+              <Button variant="outline" size="sm" onClick={() => void runLineLatencyTests()} disabled={isLatencyTesting}>
+                {isLatencyTesting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+                重新测速
+              </Button>
+            </div>
+
+            {sortedEmbyLineItems.length > 0 ? (
               <div className="grid gap-3 sm:grid-cols-2">
-                {embyLines.map((line, i) => {
-                  const key = `line-${i}`;
+                {sortedEmbyLineItems.map(({ line, index, key }) => {
                   return (
                     <div
                       key={key}
@@ -775,9 +911,12 @@ export default function SettingsPage() {
                     >
                       <div className="flex items-start justify-between gap-2">
                         <div className="min-w-0 flex-1">
-                          <p className="text-sm font-semibold">{line.name || `线路 ${i + 1}`}</p>
+                          <p className="text-sm font-semibold">{line.name || `线路 ${index + 1}`}</p>
                           <p className="mt-1 break-all truncate font-mono text-xs text-muted-foreground">
                             {line.url}
+                          </p>
+                          <p className={`mt-1 ${renderLatencyClassName(key)}`}>
+                            延迟：{renderLatencyText(key)}
                           </p>
                         </div>
                         <Button
@@ -801,7 +940,7 @@ export default function SettingsPage() {
               <p className="text-sm text-muted-foreground">暂无可用线路</p>
             )}
 
-            {whitelistLines.length > 0 && (
+            {sortedWhitelistLineItems.length > 0 && (
               <>
                 <Separator />
                 <div>
@@ -810,8 +949,7 @@ export default function SettingsPage() {
                     专属线路
                   </p>
                   <div className="grid gap-3 sm:grid-cols-2">
-                    {whitelistLines.map((line, i) => {
-                      const key = `wl-${i}`;
+                    {sortedWhitelistLineItems.map(({ line, index, key }) => {
                       return (
                         <div
                           key={key}
@@ -819,9 +957,12 @@ export default function SettingsPage() {
                         >
                           <div className="flex items-start justify-between gap-2">
                             <div className="min-w-0 flex-1">
-                              <p className="text-sm font-semibold">{line.name || `专属线路 ${i + 1}`}</p>
+                              <p className="text-sm font-semibold">{line.name || `专属线路 ${index + 1}`}</p>
                               <p className="mt-1 truncate font-mono text-xs text-muted-foreground">
                                 {line.url}
+                              </p>
+                              <p className={`mt-1 ${renderLatencyClassName(key)}`}>
+                                延迟：{renderLatencyText(key)}
                               </p>
                             </div>
                             <Button
@@ -924,28 +1065,26 @@ export default function SettingsPage() {
                       您没有 NSFW 库的访问权限，请联系管理员授予权限
                     </AlertDescription>
                   </Alert>
-                ) : nsfwStatus?.libraries && nsfwStatus.libraries.length > 0 ? (
+                ) : nsfwStatus?.library ? (
                   <div className="space-y-2">
-                    {nsfwStatus.libraries.map((lib) => (
-                      <div
-                        key={lib.name}
-                        className="flex items-center justify-between rounded-lg border p-3"
-                      >
-                        <div>
-                          <p className="text-sm font-medium">{lib.name}</p>
-                          <p className="text-xs text-muted-foreground">
-                            {lib.enabled ? "已启用" : "已禁用"}
-                          </p>
-                        </div>
-                        <Switch
-                          checked={lib.enabled}
-                          onCheckedChange={(checked) =>
-                            handleToggleNsfwLibrary(lib.name, checked)
-                          }
-                          disabled={!nsfwStatus?.can_toggle}
-                        />
+                    <div
+                      key={nsfwStatus.library.name}
+                      className="flex items-center justify-between rounded-lg border p-3"
+                    >
+                      <div>
+                        <p className="text-sm font-medium">{nsfwStatus.library.name}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {nsfwStatus.library.enabled ? "已启用" : "已禁用"}
+                        </p>
                       </div>
-                    ))}
+                      <Switch
+                        checked={nsfwStatus.library.enabled}
+                        onCheckedChange={(checked) =>
+                          handleToggleNsfwLibrary(nsfwStatus.library!.name, checked)
+                        }
+                        disabled={!nsfwStatus?.can_toggle}
+                      />
+                    </div>
                     <Alert>
                       <AlertDescription className="text-xs">
                         <strong>提示：</strong>此设置仅控制各 NSFW 库内容的显示状态，不影响您的访问权限。权限由管理员在 Emby 中管理。

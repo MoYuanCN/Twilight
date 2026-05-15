@@ -673,21 +673,23 @@ async def toggle_nsfw():
     return api_response(success, message)
 
 
-# ==================== 授权码 ====================
+# ==================== 注册码/续期码 ====================
 
 @apikey_bp.route('/use-code', methods=['POST'])
 @require_apikey
 @require_permission('account:write')
 async def use_code():
     """
-    使用授权码（注册码/续期码/白名单码）
+    使用注册码/续期码/白名单码
     
     Headers:
         X-API-Key: <your_api_key>
     
     Request:
         {
-            "reg_code": "code-xxx"
+            "reg_code": "code-xxx",
+            "emby_username": "emby_name",   // 创建 Emby 账户时必填
+            "emby_password": "Password123"   // 创建 Emby 账户时必填
         }
     
     Response:
@@ -705,18 +707,32 @@ async def use_code():
     user = g.current_user
     data = request.get_json() or {}
     reg_code = data.get('reg_code', '').strip()
+    emby_username = (data.get('emby_username') or '').strip() or None
+
+    raw_password = data.get('emby_password')
+    if isinstance(raw_password, str):
+        emby_password = raw_password
+    elif raw_password is None:
+        emby_password = None
+    else:
+        emby_password = ''
 
     if not reg_code:
-        return api_response(False, "缺少授权码", code=400)
+        return api_response(False, "缺少注册码/续期码", code=400)
 
-    success, message, emby_password = await UserService.use_code(user, reg_code)
+    success, message, generated_emby_password = await UserService.use_code(
+        user,
+        reg_code,
+        emby_username=emby_username,
+        emby_password=emby_password,
+    )
 
     if success:
         # 重新获取用户信息
         updated_user = await UserOperate.get_user_by_uid(user.UID)
         role_names = {0: 'ADMIN', 1: 'NORMAL', 2: 'WHITE_LIST', -1: 'UNRECOGNIZED'}
         return api_response(True, message, {
-            'emby_password': emby_password,
+            'emby_password': generated_emby_password,
             'expired_at': updated_user.EXPIRED_AT,
             'role': updated_user.ROLE,
             'role_name': role_names.get(updated_user.ROLE, 'UNKNOWN'),

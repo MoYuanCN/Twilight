@@ -2,11 +2,12 @@
 
 import { useCallback, useState } from "react";
 import { motion } from "framer-motion";
-import { Calendar, Clock, Gift, Key, Loader2 } from "lucide-react";
+import { Calendar, Clock, Eye, EyeOff, Gift, Key, Loader2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { useAsyncResource } from "@/hooks/use-async-resource";
 import { PageError } from "@/components/layout/page-state";
@@ -36,6 +37,9 @@ export default function DashboardPage() {
   const [regCodeInfo, setRegCodeInfo] = useState<{ type: number; type_name: string; days: number } | null>(null);
   const [showConfirm, setShowConfirm] = useState(false);
   const [isUsingCode, setIsUsingCode] = useState(false);
+  const [embyUsername, setEmbyUsername] = useState("");
+  const [embyPassword, setEmbyPassword] = useState("");
+  const [showEmbyPassword, setShowEmbyPassword] = useState(false);
 
   const loadDashboardData = useCallback(async () => true, []);
 
@@ -77,7 +81,7 @@ export default function DashboardPage() {
 
   const handleCheckRegcode = async () => {
     if (!regCode.trim()) {
-      toast({ title: "请输入授权码", variant: "destructive" });
+      toast({ title: "请输入注册码/续期码", variant: "destructive" });
       return;
     }
 
@@ -85,9 +89,12 @@ export default function DashboardPage() {
       const res = await api.checkRegcode(regCode.trim());
       if (res.success && res.data) {
         setRegCodeInfo(res.data);
+        setEmbyUsername("");
+        setEmbyPassword("");
+        setShowEmbyPassword(false);
         setShowConfirm(true);
       } else {
-        toast({ title: "授权码无效", description: res.message, variant: "destructive" });
+        toast({ title: "注册码/续期码无效", description: res.message, variant: "destructive" });
       }
     } catch (err: any) {
       toast({ title: "检查失败", description: err.message || "网络异常", variant: "destructive" });
@@ -97,14 +104,43 @@ export default function DashboardPage() {
   const handleUseRegcode = async () => {
     if (!regCodeInfo || !regCode.trim()) return;
 
+    const requiresEmbyRegister = !user?.emby_id && (regCodeInfo.type === 1 || regCodeInfo.type === 3);
+
+    const validateEmbyPassword = (pwd: string) => {
+      if (pwd.length < 8) return "Emby 密码至少 8 位";
+      if (!/[a-z]/.test(pwd)) return "Emby 密码至少包含一个小写字母";
+      if (!/[A-Z]/.test(pwd)) return "Emby 密码至少包含一个大写字母";
+      if (!/\d/.test(pwd)) return "Emby 密码至少包含一个数字";
+      return "";
+    };
+
+    if (requiresEmbyRegister) {
+      if (!embyUsername.trim()) {
+        toast({ title: "请输入 Emby 用户名", variant: "destructive" });
+        return;
+      }
+      const pwdErr = validateEmbyPassword(embyPassword);
+      if (pwdErr) {
+        toast({ title: "Emby 密码强度不足", description: pwdErr, variant: "destructive" });
+        return;
+      }
+    }
+
     setIsUsingCode(true);
     try {
-      const res = await api.useCode(regCode.trim());
+      const res = await api.useCode(
+        regCode.trim(),
+        requiresEmbyRegister
+          ? { embyUsername: embyUsername.trim(), embyPassword }
+          : undefined
+      );
       if (res.success) {
-        toast({ title: "授权码使用成功", description: regCodeInfo.type_name, variant: "success" });
+        toast({ title: "注册码/续期码使用成功", description: regCodeInfo.type_name, variant: "success" });
         setRegCode("");
         setRegCodeInfo(null);
         setShowConfirm(false);
+        setEmbyUsername("");
+        setEmbyPassword("");
         await fetchUser();
       } else {
         toast({ title: "使用失败", description: res.message, variant: "destructive" });
@@ -174,14 +210,14 @@ export default function DashboardPage() {
             <Key className="h-5 w-5" />
           </div>
           <div>
-            <h3 className="text-base font-black tracking-tight">授权码使用</h3>
+            <h3 className="text-base font-black tracking-tight">注册码/续期码使用</h3>
             <p className="text-[11px] text-muted-foreground font-bold uppercase tracking-tighter">Code Use</p>
           </div>
         </div>
 
         <div className="flex flex-col gap-3 md:flex-row">
           <Input
-            placeholder="请输入授权码"
+            placeholder="请输入注册码或续期码"
             value={regCode}
             onChange={(e) => setRegCode(e.target.value)}
             className="h-12 rounded-xl border-white/60 bg-white/40 shadow-inner"
@@ -195,12 +231,54 @@ export default function DashboardPage() {
       <Dialog open={showConfirm} onOpenChange={setShowConfirm}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>确认使用授权码</DialogTitle>
+            <DialogTitle>确认使用注册码/续期码</DialogTitle>
           </DialogHeader>
           {regCodeInfo && (
             <div className="space-y-2 text-sm text-muted-foreground">
               <p>类型: {regCodeInfo.type_name}</p>
-              <p>{regCodeInfo.type === 3 ? "有效期: 永久" : `增加时长: ${regCodeInfo.days} 天`}</p>
+              <p>
+                {regCodeInfo.type === 2
+                  ? regCodeInfo.days <= 0
+                    ? "续期时长: 永久"
+                    : `续期时长: ${regCodeInfo.days} 天`
+                  : regCodeInfo.days <= 0
+                    ? "有效期: 永久"
+                    : `增加时长: ${regCodeInfo.days} 天`}
+              </p>
+            </div>
+          )}
+          {regCodeInfo && !user?.emby_id && (regCodeInfo.type === 1 || regCodeInfo.type === 3) && (
+            <div className="space-y-3 rounded-lg border border-border p-3">
+              <p className="text-sm font-medium">该卡码将创建 Emby 账号，请填写以下信息</p>
+              <div className="space-y-2">
+                <Label htmlFor="embyUsername">Emby 用户名</Label>
+                <Input
+                  id="embyUsername"
+                  value={embyUsername}
+                  onChange={(e) => setEmbyUsername(e.target.value)}
+                  placeholder="请输入 Emby 用户名"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="embyPassword">Emby 密码</Label>
+                <div className="relative">
+                  <Input
+                    id="embyPassword"
+                    type={showEmbyPassword ? "text" : "password"}
+                    value={embyPassword}
+                    onChange={(e) => setEmbyPassword(e.target.value)}
+                    placeholder="至少8位，含大小写字母和数字"
+                    className="pr-10"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowEmbyPassword((v) => !v)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  >
+                    {showEmbyPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+              </div>
             </div>
           )}
           <div className="flex gap-3 justify-end">

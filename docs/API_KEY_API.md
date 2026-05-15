@@ -260,7 +260,7 @@ curl -X POST "https://your-domain.com/api/v1/apikey/emby/kick" \
   -H "X-API-Key: key-xxxxxxxxxxxxxxxx-yyyyyyyy"
 ```
 
-### 5.5 NSFW 与授权码
+### 5.5 NSFW 与注册码/续期码
 
 #### 查询 NSFW 状态
 
@@ -303,7 +303,7 @@ curl -X PUT "https://your-domain.com/api/v1/apikey/emby/nsfw" \
   -d '{"enable":true}'
 ```
 
-#### 使用授权码
+#### 使用注册码/续期码
 
 `POST /api/v1/apikey/use-code`
 
@@ -315,11 +315,13 @@ curl -X PUT "https://your-domain.com/api/v1/apikey/emby/nsfw" \
 
 ```json
 {
-  "reg_code": "code-xxx"
+  "reg_code": "code-xxx",
+  "emby_username": "emby_name",
+  "emby_password": "Password123"
 }
 ```
 
-- 说明：使用注册或续期授权码。
+- 说明：使用注册码/续期码；当会触发创建 Emby 账号时，需要额外提供 `emby_username` 与 `emby_password`。
 - 示例 cURL：
 
 ```bash

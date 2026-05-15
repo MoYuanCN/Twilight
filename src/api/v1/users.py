@@ -417,20 +417,16 @@ async def change_my_emby_password():
 @users_bp.route('/me/nsfw', methods=['GET'])
 @require_auth
 async def get_nsfw_status():
-    """
-    获取 NSFW 权限状态（支持多 NSFW 库）
-    
+    """获取特殊媒体库的可见状态（单库模式）。
+
     Response:
         {
             "success": true,
             "data": {
-                "enabled": true,
-                "has_permission": true,
-                "can_toggle": true,
-                "libraries": [
-                    {"name": "xxx", "enabled": true},
-                    {"name": "yyy", "enabled": false}
-                ],
+                "enabled": true,            # 当前是否可见
+                "has_permission": true,     # 管理员是否允许访问
+                "can_toggle": true,         # 是否可以自行切换
+                "library": {"name": "xxx", "enabled": true} | null,
                 "message": "..."
             }
         }
@@ -438,40 +434,26 @@ async def get_nsfw_status():
     from src.services import EmbyService
     user = g.current_user
 
-    nsfw_names = EmbyService.get_nsfw_library_names()
-    nsfw_map = await EmbyService.find_nsfw_library_ids()
-
-    if not nsfw_map:
-        return api_response(True, "NSFW 库未配置", {
+    nsfw_name = EmbyService.get_nsfw_library_name()
+    if not nsfw_name:
+        return api_response(True, "特殊媒体库未配置", {
             'enabled': False,
             'has_permission': False,
             'can_toggle': False,
-            'libraries': [],
-            'message': '系统未配置 NSFW 媒体库'
+            'library': None,
+            'message': '系统未配置特殊媒体库'
         })
 
     has_permission = bool(user.NSFW_ALLOWED)
-
-    # 获取用户已启用的 NSFW 库（从 Emby policy 中读取）
-    enabled_lib_ids, enable_all = await EmbyService.get_user_library_access(user)
-
-    libs = []
-    any_enabled = False
-    for name, lib_id in nsfw_map.items():
-        lib_enabled = enable_all or lib_id in enabled_lib_ids
-        if lib_enabled and has_permission:
-            any_enabled = True
-        libs.append({
-            'name': name,
-            'enabled': lib_enabled and has_permission,
-        })
+    enabled = bool(has_permission and user.NSFW)
 
     return api_response(True, "获取成功", {
-        'enabled': any_enabled,
+        'enabled': enabled,
         'has_permission': has_permission,
         'can_toggle': has_permission,
-        'libraries': libs,
-        'message': '有访问权限，可自行开关' if has_permission else '您没有 NSFW 库的访问权限，请联系管理员'
+        'library': {'name': nsfw_name, 'enabled': enabled},
+        'message': '有访问权限，可自行开关' if has_permission
+        else '您没有特殊媒体库的访问权限，请联系管理员',
     })
 
 
@@ -642,31 +624,27 @@ async def unbind_emby_account():
 @users_bp.route('/me/nsfw', methods=['PUT'])
 @require_auth
 async def toggle_my_nsfw():
-    """
-    切换 NSFW 库访问权限（支持按库切换）
-    
+    """切换特殊媒体库可见性（单库模式）。
+
     Request:
         {
-            "enable": true,
-            "library_names": ["xxx", "yyy"]  // 可选，指定要切换的库
+            "enable": true            # 是否显示特殊媒体库
         }
     """
     from src.services import EmbyService
-    from src.config import EmbyConfig
-    
+
     data = request.get_json() or {}
-    enable = data.get('enable', False)
-    library_names = data.get('library_names', None)  # None = 所有 NSFW 库
+    enable = bool(data.get('enable', False))
     user = g.current_user
-    
-    nsfw_map = await EmbyService.find_nsfw_library_ids()
-    if not nsfw_map:
-        return api_response(False, "系统未配置 NSFW 媒体库", code=400)
-    
+
+    nsfw_name = EmbyService.get_nsfw_library_name()
+    if not nsfw_name:
+        return api_response(False, "系统未配置特殊媒体库", code=400)
+
     if not user.NSFW_ALLOWED:
-        return api_response(False, "管理员未授予您 NSFW 库的访问权限，无法切换此选项", code=403)
-    
-    success, message = await UserService.toggle_nsfw(user, enable, library_names)
+        return api_response(False, "管理员未授予您特殊媒体库的访问权限，无法切换此选项", code=403)
+
+    success, message = await UserService.toggle_nsfw(user, enable)
     return api_response(success, message)
 
 
@@ -675,7 +653,7 @@ async def toggle_my_nsfw():
 @users_bp.route('/regcode/check', methods=['POST'])
 async def check_regcode():
     """
-    检查注册码类型
+    检查注册码/续期码类型
     
     Request:
         {
@@ -714,11 +692,12 @@ async def check_regcode():
         return api_response(False, "注册码已用完", code=400)
     
     type_names = {1: '注册', 2: '续期', 3: '白名单'}
+    days = UserService._normalize_code_days(code_info.DAYS, default=30)
     
     return api_response(True, "注册码有效", {
         'type': code_info.TYPE,
         'type_name': type_names.get(code_info.TYPE, '未知'),
-        'days': code_info.DAYS or 30,
+        'days': days,
         'valid': True,
     })
 
@@ -755,16 +734,18 @@ async def renew_my_account():
 @require_auth
 async def use_code():
     """
-    统一使用授权码（注册码/续期码/白名单码）
+    统一使用注册码/续期码/白名单码
     
-    已登录用户根据授权码类型自动处理：
+    已登录用户根据卡码类型自动处理：
     - 注册码：为无 Emby 账户的用户创建 Emby 账户
     - 续期码：续期
     - 白名单码：赋予白名单角色，自动创建 Emby 账户（如没有）
     
     Request:
         {
-            "reg_code": "code-xxx"
+            "reg_code": "code-xxx",
+            "emby_username": "emby_name",   // 创建 Emby 账户时必填
+            "emby_password": "Password123"   // 创建 Emby 账户时必填
         }
     
     Response:
@@ -780,16 +761,30 @@ async def use_code():
     """
     data = request.get_json() or {}
     reg_code = data.get('reg_code', '').strip()
+    emby_username = (data.get('emby_username') or '').strip() or None
+
+    raw_password = data.get('emby_password')
+    if isinstance(raw_password, str):
+        emby_password = raw_password
+    elif raw_password is None:
+        emby_password = None
+    else:
+        emby_password = ''
     
     if not reg_code:
-        return api_response(False, "缺少授权码", code=400)
+        return api_response(False, "缺少注册码/续期码", code=400)
     
-    success, message, emby_password = await UserService.use_code(g.current_user, reg_code)
+    success, message, generated_emby_password = await UserService.use_code(
+        g.current_user,
+        reg_code,
+        emby_username=emby_username,
+        emby_password=emby_password,
+    )
     
     if success:
         user_info = await UserService.get_user_info(g.current_user)
         return api_response(True, message, {
-            'emby_password': emby_password,
+            'emby_password': generated_emby_password,
             'expire_status': user_info['expire_status'],
             'expired_at': user_info['expired_at'],
             'role': user_info['role'],

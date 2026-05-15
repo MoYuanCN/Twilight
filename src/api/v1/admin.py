@@ -420,24 +420,20 @@ async def set_user_nsfw_permission(uid: int):
     if not user.EMBYID:
         return api_response(False, "用户未绑定 Emby 账户", code=400)
     
-    # 通过名称查找NSFW库ID
-    nsfw_library_id = await EmbyService.find_nsfw_library_id()
-    if not nsfw_library_id:
-        return api_response(False, "系统未配置 NSFW 媒体库", code=400)
-    
+    # 单库模式：通过名称查找 NSFW 库（不存在时禁用接口）
+    nsfw_name = EmbyService.get_nsfw_library_name()
+    if not nsfw_name:
+        return api_response(False, "系统未配置特殊媒体库", code=400)
+
     data = request.get_json() or {}
-    grant = data.get('grant', True)
+    grant = bool(data.get('grant', True))
 
     try:
         import json as _json
 
-        # 更新数据库中的权限状态
         user.NSFW_ALLOWED = grant
-
-        # 同步偏好集合：
-        # - 授予：默认开放所有 NSFW 库（用户可在前端再细化）
-        # - 撤销：清空偏好并关闭 NSFW 总开关
-        nsfw_names = list((await EmbyService.find_nsfw_library_ids()).keys())
+        # 授予 → 默认开启可见；撤销 → 关闭可见
+        user.NSFW = grant
 
         other_data: dict = {}
         if user.OTHER:
@@ -447,30 +443,20 @@ async def set_user_nsfw_permission(uid: int):
                     other_data = {}
             except (ValueError, TypeError):
                 other_data = {}
-
-        if grant:
-            other_data['nsfw_libraries'] = sorted(nsfw_names)
-            user.NSFW = bool(nsfw_names)
-        else:
-            other_data['nsfw_libraries'] = []
-            user.NSFW = False
-
+        other_data['nsfw_libraries'] = [nsfw_name] if grant else []
         user.OTHER = _json.dumps(other_data)
         await UserOperate.update_user(user)
 
-        # 通过统一的三步重建流程同步到 Emby
         success, message = await UserService.sync_user_to_emby(user)
-
         if success:
             status_msg = "已授予" if grant else "已撤销"
-            return api_response(True, f"{status_msg} NSFW 库访问权限")
-        else:
-            return api_response(False, f"同步到 Emby 失败: {message}", code=500)
+            return api_response(True, f"{status_msg}特殊媒体库访问权限")
+        return api_response(False, f"同步到 Emby 失败: {message}", code=500)
 
     except Exception as e:
         import logging
         logger = logging.getLogger(__name__)
-        logger.error(f"设置用户 NSFW 权限失败: {e}", exc_info=True)
+        logger.error(f"设置用户特殊媒体库权限失败: {e}", exc_info=True)
         return api_response(False, f"操作失败: {e}", code=500)
 
 
@@ -872,17 +858,27 @@ async def create_regcode():
             "type": 1,              // 1=注册, 2=续期, 3=白名单
             "validity_time": -1,    // 有效期（小时），-1 永久
             "use_count_limit": 1,   // 使用次数限制，-1 无限
-            "days": 30,             // 有效天数
+            "days": 30,             // 有效天数（0 或 -1 表示永久）
             "count": 1              // 生成数量
         }
     """
     data = request.get_json() or {}
-    
-    code_type = data.get('type', 1)
-    validity_time = data.get('validity_time', -1)
-    use_count_limit = data.get('use_count_limit', 1)
-    days = data.get('days', 30)
-    count = data.get('count', 1)
+
+    try:
+        code_type = int(data.get('type', 1))
+        validity_time = int(data.get('validity_time', -1))
+        use_count_limit = int(data.get('use_count_limit', 1))
+        days = int(data.get('days', 30))
+        count = int(data.get('count', 1))
+    except (TypeError, ValueError):
+        return api_response(False, "参数类型错误，请检查 type/validity_time/use_count_limit/days/count", code=400)
+
+    if code_type not in (1, 2, 3):
+        return api_response(False, "type 仅支持 1=注册, 2=续期, 3=白名单", code=400)
+
+    # 0 和 -1 都表示永久
+    if days <= 0:
+        days = -1
     
     if count < 1 or count > 100:
         return api_response(False, "生成数量必须在 1-100 之间", code=400)
