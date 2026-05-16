@@ -78,8 +78,7 @@ async def get_libraries():
                 {
                     "id": "xxx",
                     "name": "电影",
-                    "type": "movies",
-                    "is_nsfw": false
+                    "type": "movies"
                 }
             ]
         }

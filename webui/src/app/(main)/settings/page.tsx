@@ -18,7 +18,6 @@ import {
   X,
   Tv,
   Key,
-  AlertTriangle,
   Palette,
   Lock,
   Globe,
@@ -43,11 +42,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useAsyncResource } from "@/hooks/use-async-resource";
 import { PageError, PageLoading } from "@/components/layout/page-state";
 import { useAuthStore } from "@/store/auth";
-import { api, type UserSettings, type TelegramStatus, type NsfwStatus, type EmbyStatus } from "@/lib/api";
-import {
-  Alert,
-  AlertDescription,
-} from "@/components/ui/alert";
+import { api, type UserSettings, type TelegramStatus, type EmbyStatus } from "@/lib/api";
 
 const container = {
   hidden: { opacity: 0 },
@@ -64,7 +59,6 @@ export default function SettingsPage() {
   const { user, fetchUser } = useAuthStore();
   const [settings, setSettings] = useState<UserSettings | null>(null);
   const [telegramStatus, setTelegramStatus] = useState<TelegramStatus | null>(null);
-  const [nsfwStatus, setNsfwStatus] = useState<NsfwStatus | null>(null);
   const [bgmTokenSet, setBgmTokenSet] = useState(false);
   const [bgmMode, setBgmMode] = useState(false);
   const [bgmToken, setBgmToken] = useState("");
@@ -232,10 +226,9 @@ export default function SettingsPage() {
   }, [embyLineItems, whitelistLineItems, testSingleLineLatency]);
 
   const loadSettingsResource = useCallback(async () => {
-    const [settingsRes, tgRes, nsfwRes] = await Promise.all([
+    const [settingsRes, tgRes] = await Promise.all([
       api.getMySettings(),
       api.getTelegramStatus(),
-      api.getNsfwStatus(),
     ]);
     if (settingsRes.success && settingsRes.data) {
       setSettings(settingsRes.data);
@@ -245,9 +238,6 @@ export default function SettingsPage() {
     }
     if (tgRes.success && tgRes.data) {
       setTelegramStatus(tgRes.data);
-    }
-    if (nsfwRes.success && nsfwRes.data) {
-      setNsfwStatus(nsfwRes.data);
     }
     return true;
   }, []);
@@ -283,36 +273,6 @@ export default function SettingsPage() {
       toast({ title: "保存失败", description: error.message, variant: "destructive" });
     } finally {
       setIsBgmLoading(false);
-    }
-  };
-
-  const handleToggleNsfwLibrary = async (libraryName: string, enabled: boolean) => {
-    try {
-      const res = await api.toggleNsfw(enabled);
-      if (res.success) {
-        setNsfwStatus((prev) => {
-          if (!prev) return null;
-          if (!prev.library || prev.library.name !== libraryName) {
-            return { ...prev, enabled };
-          }
-          return {
-            ...prev,
-            enabled,
-            library: {
-              ...prev.library,
-              enabled,
-            },
-          };
-        });
-        toast({
-          title: enabled ? `已开启「${libraryName}」` : `已关闭「${libraryName}」`,
-          variant: "success",
-        });
-      } else {
-        toast({ title: "操作失败", description: res.message, variant: "destructive" });
-      }
-    } catch (error: any) {
-      toast({ title: "操作失败", description: error.message, variant: "destructive" });
     }
   };
 
@@ -1035,71 +995,6 @@ export default function SettingsPage() {
                 </div>
               </div>
             </div>
-
-            <Separator />
-
-            {/* NSFW Management */}
-            {settings?.system_config.nsfw_library_configured && (
-              <div className="space-y-3">
-                <div className="space-y-0.5">
-                  <Label className="flex items-center gap-2">
-                    NSFW 内容显示
-                    {nsfwStatus?.has_permission ? (
-                      <Badge variant="default" className="text-xs">
-                        有权限
-                      </Badge>
-                    ) : (
-                      <Badge variant="outline" className="text-xs">
-                        无权限
-                      </Badge>
-                    )}
-                  </Label>
-                  <p className="text-sm text-muted-foreground">
-                    {nsfwStatus?.message || "控制是否在媒体库中显示 NSFW 内容"}
-                  </p>
-                </div>
-                {!nsfwStatus?.has_permission ? (
-                  <Alert>
-                    <AlertTriangle className="h-4 w-4" />
-                    <AlertDescription>
-                      您没有 NSFW 库的访问权限，请联系管理员授予权限
-                    </AlertDescription>
-                  </Alert>
-                ) : nsfwStatus?.library ? (
-                  <div className="space-y-2">
-                    <div
-                      key={nsfwStatus.library.name}
-                      className="flex items-center justify-between rounded-lg border p-3"
-                    >
-                      <div>
-                        <p className="text-sm font-medium">{nsfwStatus.library.name}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {nsfwStatus.library.enabled ? "已启用" : "已禁用"}
-                        </p>
-                      </div>
-                      <Switch
-                        checked={nsfwStatus.library.enabled}
-                        onCheckedChange={(checked) =>
-                          handleToggleNsfwLibrary(nsfwStatus.library!.name, checked)
-                        }
-                        disabled={!nsfwStatus?.can_toggle}
-                      />
-                    </div>
-                    <Alert>
-                      <AlertDescription className="text-xs">
-                        <strong>提示：</strong>此设置仅控制各 NSFW 库内容的显示状态，不影响您的访问权限。权限由管理员在 Emby 中管理。
-                      </AlertDescription>
-                    </Alert>
-                  </div>
-                ) : (
-                  <Alert>
-                    <AlertDescription className="text-xs">
-                      暂无可用的 NSFW 库
-                    </AlertDescription>
-                  </Alert>
-                )}
-              </div>
-            )}
 
             <Separator />
           </CardContent>

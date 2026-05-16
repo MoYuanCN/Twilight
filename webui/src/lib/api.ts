@@ -289,10 +289,6 @@ class ApiClient {
     });
   }
 
-  async getNsfwStatus() {
-    return this.request<NsfwStatus>("/users/me/nsfw");
-  }
-
   async bindEmbyAccount(embyUsername: string, embyPassword: string) {
     return this.request<{ emby_id: string; emby_username: string }>("/users/me/emby/bind", {
       method: "POST",
@@ -332,13 +328,6 @@ class ApiClient {
 
   async getEmbyUrls() {
     return this.request<{ lines: Array<{ name: string; url: string }>; whitelist_lines?: Array<{ name: string; url: string }> }>(`/system/emby-urls`);
-  }
-
-  async toggleNsfw(enable: boolean) {
-    return this.request("/users/me/nsfw", {
-      method: "PUT",
-      body: JSON.stringify({ enable }),
-    });
   }
 
   async checkRegcode(regCode: string) {
@@ -481,13 +470,6 @@ class ApiClient {
     });
   }
 
-  async setUserNsfwPermission(uid: number, grant: boolean) {
-    return this.request(`/admin/users/${uid}/nsfw`, {
-      method: "PUT",
-      body: JSON.stringify({ grant }),
-    });
-  }
-
   async deleteUser(uid: number) {
     return this.request(`/admin/users/${uid}`, {
       method: "DELETE",
@@ -560,25 +542,12 @@ class ApiClient {
   }
 
   async getEmbyLibraries() {
-    return this.request<Array<{ id: string; name: string; type: string; is_nsfw: boolean }>>("/system/admin/emby/libraries");
-  }
-
-  /** 设置唯一的特殊媒体库（传空字符串清空）。 */
-  async updateNsfwLibrary(libraryName: string) {
-    return this.request<{ nsfw_library_name: string }>("/system/admin/emby/nsfw", {
-      method: "PUT",
-      body: JSON.stringify({ library_name: libraryName }),
-    });
-  }
-
-  /** 兼容旧调用：仅会使用数组中的第一项作为唯一特殊媒体库。 */
-  async updateNsfwLibraries(libraryNames: string[]) {
-    return this.updateNsfwLibrary(libraryNames[0] || "");
+    return this.request<Array<{ id: string; name: string; type: string }>>("/system/admin/emby/libraries");
   }
 
   async getUserLibraries(uid: number) {
     return this.request<{
-      all_libraries: Array<{ id: string; name: string; type: string; is_nsfw: boolean }>;
+      all_libraries: Array<{ id: string; name: string; type: string }>;
       enabled_ids: string[];
       enable_all: boolean;
       has_emby: boolean;
@@ -1006,13 +975,6 @@ export interface UserInfo {
   emby_id?: string;
   avatar?: string;
   bgm_mode: boolean;
-  nsfw: boolean | {  // 可能是布尔值（列表）或对象（详情）
-    enabled: boolean;
-    has_permission: boolean;
-    nsfw_library_name?: string;
-  };
-  nsfw_enabled?: boolean;  // 后端返回的 NSFW 开关
-  nsfw_allowed?: boolean;  // 后端返回的 NSFW 权限
   created_at?: string | number;
   register_time?: number;
   is_pending?: boolean;  // 是否待激活
@@ -1035,8 +997,6 @@ export interface ApiKeyItem {
 }
 
 export interface UserSettings {
-  nsfw_enabled: boolean;
-  nsfw_can_toggle: boolean;
   bgm_mode: boolean;
   bgm_token_set: boolean;
   api_key_enabled: boolean;
@@ -1056,7 +1016,6 @@ export interface UserSettings {
     device_limit_enabled: boolean;
     max_devices: number;
     max_streams: number;
-    nsfw_library_configured: boolean;
   };
 }
 
@@ -1091,15 +1050,6 @@ export interface TelegramRebindRequest {
   reviewer_uid?: number | null;
   created_at: number;
   reviewed_at?: number | null;
-}
-
-export interface NsfwStatus {
-  enabled: boolean;
-  has_permission: boolean;
-  can_toggle: boolean;
-  /** 单库模式：当前特殊媒体库；未配置时为 null */
-  library: { name: string; enabled: boolean } | null;
-  message: string;
 }
 
 export interface MediaItem {

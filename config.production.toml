@@ -76,8 +76,6 @@ emby_url_list = [
 emby_url_list_for_whitelist = [
   "直连 : http://your-server:8096/",
 ]
-# NSFW 媒体库名称列表，匹配 Emby 中的媒体库名
-emby_nsfw = []
 
 # ===================================================================
 [Telegram]

@@ -371,8 +371,8 @@ class UserService:
             
             # 9999-12-31 的时间戳（管理员和白名单使用）
             permanent_expire = 253402214400
-            
-            # 管理员默认激活，到期时间为 9999 年，并默认开放所有特殊媒体库权限
+
+            # 管理员默认激活，到期时间为 9999 年
             if is_admin:
                 user = UserModel(
                     UID=new_uid,
@@ -385,8 +385,6 @@ class UserService:
                     ACTIVE_STATUS=True,  # 管理员默认激活
                     EXPIRED_AT=permanent_expire,
                     REGISTER_TIME=timestamp(),
-                    NSFW_ALLOWED=True,
-                    NSFW=True,
                 )
             elif is_whitelist:
                 # 白名单用户默认激活，到期时间为 9999 年
@@ -474,10 +472,6 @@ class UserService:
                 # 如果角色是未注册，更新为普通用户
                 if existing_user.ROLE == Role.UNRECOGNIZED.value:
                     existing_user.ROLE = Role.NORMAL.value
-                # 管理员默认开放所有特殊媒体库权限
-                if existing_user.ROLE == Role.ADMIN.value:
-                    existing_user.NSFW_ALLOWED = True
-                    existing_user.NSFW = True
                 existing_user.EMAIL = email
                 existing_user.REGISTER_TIME = timestamp()
                 import json
@@ -543,17 +537,8 @@ class UserService:
                     EXPIRED_AT=user_expire,
                     REGISTER_TIME=timestamp(),
                     OTHER=json.dumps({'emby_username': username}),
-                    NSFW_ALLOWED=True if user_role == Role.ADMIN.value else False,
-                    NSFW=True if user_role == Role.ADMIN.value else False,
                 )
                 await UserOperate.add_user(user)
-
-            # 管理员账号：默认在 Emby 端授予所有特殊媒体库访问
-            if user.ROLE == Role.ADMIN.value and user.EMBYID:
-                try:
-                    await UserService.sync_user_to_emby(user)
-                except Exception as sync_err:
-                    logger.warning(f"管理员特殊媒体库初始化失败: {sync_err}")
 
             # 更新注册码使用记录
             if reg_code:
@@ -954,108 +939,18 @@ class UserService:
             return False, f"修改 Emby 密码失败: {e}"
 
     @staticmethod
-    async def toggle_nsfw(user: UserModel, enable: bool, library_names: List[str] = None) -> Tuple[bool, str]:
-        """切换单个特殊媒体库的可见性（Sakura_embyboss 单库模式）。
-
-        系统仅配置一个 NSFW 媒体库，`library_names` 参数仅作兼容保留——
-        无论传不传，操作目标始终是配置的那一个库。
-        """
-        _ = library_names  # 仅作前向兼容；单库模式下无需选择
-
-        if not user.EMBYID:
-            return False, "用户没有关联的 Emby 账户"
-
-        if enable and not user.NSFW_ALLOWED:
-            return False, "管理员未授予您访问特殊媒体库的权限"
-
-        from src.services.emby_service import EmbyService
-
-        nsfw_name = EmbyService.get_nsfw_library_name()
-        if not nsfw_name:
-            return False, "系统未配置特殊媒体库"
-
-        emby = get_emby_client()
-
-        try:
-            if enable:
-                ok = await emby.show_folders_by_names(user.EMBYID, [nsfw_name])
-            else:
-                ok = await emby.hide_folders_by_names(user.EMBYID, [nsfw_name])
-        except Exception as e:
-            logger.error(f"切换特殊媒体库失败: {e}", exc_info=True)
-            return False, f"操作失败: {e}"
-
-        if not ok:
-            return False, "更新 Emby 特殊媒体库权限失败"
-
-        # 同步更新本地状态（NSFW 主开关）
-        user.NSFW = bool(enable)
-        # OTHER.nsfw_libraries 仅保留当前单库，便于历史兼容
-        other_data: dict = {}
-        if user.OTHER:
-            try:
-                other_data = json.loads(user.OTHER)
-                if not isinstance(other_data, dict):
-                    other_data = {}
-            except (json.JSONDecodeError, TypeError):
-                other_data = {}
-        other_data['nsfw_libraries'] = [nsfw_name] if enable else []
-        user.OTHER = json.dumps(other_data)
-        await UserOperate.update_user(user)
-
-        status = "开启" if enable else "关闭"
-        return True, f"特殊媒体库「{nsfw_name}」已{status}，已同步到 Emby"
-
-    @staticmethod
-    async def get_user_nsfw_preferences(user: UserModel) -> List[str]:
-        """获取用户已启用的特殊媒体库名称（单库模式下最多 1 项）。"""
-        from src.services.emby_service import EmbyService
-
-        nsfw_name = EmbyService.get_nsfw_library_name()
-        if not nsfw_name:
-            return []
-        if user.NSFW_ALLOWED and user.NSFW:
-            return [nsfw_name]
-        return []
-
-    @staticmethod
     async def sync_user_to_emby(user: UserModel) -> Tuple[bool, str]:
-        """同步用户状态到 Emby（单特殊库模式 + Sakura show/hide）。
-
-        - 同步 ACTIVE_STATUS
-        - 单个 NSFW 库：如果 NSFW_ALLOWED 且 NSFW=True → show；否则 → hide
-        - 不触碰其他媒体库
-        """
+        """同步用户启用/禁用状态到 Emby。"""
         if not user.EMBYID:
             return True, "用户未绑定 Emby 账户，跳过同步"
 
         try:
-            from src.services.emby_service import EmbyService
-
             emby = get_emby_client()
-
-            # 1. 启用/禁用账户
             await emby.set_user_enabled(user.EMBYID, user.ACTIVE_STATUS)
-
-            # 2. 同步特殊媒体库可见性
-            nsfw_name = EmbyService.get_nsfw_library_name()
-            if nsfw_name:
-                should_show = bool(user.NSFW_ALLOWED) and bool(user.NSFW)
-                if should_show:
-                    await emby.show_folders_by_names(user.EMBYID, [nsfw_name])
-                else:
-                    await emby.hide_folders_by_names(user.EMBYID, [nsfw_name])
-                logger.info(
-                    f"用户状态已同步到 Emby: {user.USERNAME} (UID: {user.UID}), "
-                    f"状态: {'启用' if user.ACTIVE_STATUS else '禁用'}, "
-                    f"特殊库「{nsfw_name}」: {'显示' if should_show else '隐藏'}"
-                )
-            else:
-                logger.info(
-                    f"用户状态已同步到 Emby: {user.USERNAME} (UID: {user.UID}), "
-                    f"状态: {'启用' if user.ACTIVE_STATUS else '禁用'}, 特殊媒体库未配置"
-                )
-
+            logger.info(
+                f"用户状态已同步到 Emby: {user.USERNAME} (UID: {user.UID}), "
+                f"状态: {'启用' if user.ACTIVE_STATUS else '禁用'}"
+            )
             return True, "同步成功"
         except Exception as e:
             logger.error(f"同步用户状态到 Emby 失败: {e}", exc_info=True)
@@ -1096,8 +991,6 @@ class UserService:
             "active": user.ACTIVE_STATUS,
             "expire_status": format_expire_time(user.EXPIRED_AT),
             "expired_at": user.EXPIRED_AT,
-            "nsfw_enabled": user.NSFW,
-            "nsfw_allowed": user.NSFW_ALLOWED,
             "bgm_mode": user.BGM_MODE,
             "avatar": user.AVATAR or None,
             "register_time": user.REGISTER_TIME,
@@ -1168,18 +1061,7 @@ class UserService:
             success = await emby.set_user_admin(user.EMBYID, is_admin)
             if success:
                 user.ROLE = Role.ADMIN.value if is_admin else Role.NORMAL.value
-                if is_admin:
-                    # 管理员默认拥有特殊媒体库访问及自助编辑权限
-                    user.NSFW_ALLOWED = True
-                    user.NSFW = True
                 await UserOperate.update_user(user)
-
-                # 授予后立即将 NSFW 偏好同步到 Emby
-                if is_admin:
-                    try:
-                        await UserService.sync_user_to_emby(user)
-                    except Exception as sync_err:
-                        logger.warning(f"管理员特殊媒体库同步失败: {sync_err}")
 
                 status = "授予" if is_admin else "撤销"
                 return True, f"已{status}管理员权限"

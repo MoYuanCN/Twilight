@@ -83,13 +83,8 @@ export default function AdminUsersPage() {
     emby_id: "",
     active: true,
   });
-  const [userNsfwInfo, setUserNsfwInfo] = useState<{
-    enabled: boolean;
-    has_permission: boolean;
-  } | null>(null);
-
   // 媒体库可见性
-  const [libraryAllList, setLibraryAllList] = useState<Array<{ id: string; name: string; type: string; is_nsfw: boolean }>>([]);
+  const [libraryAllList, setLibraryAllList] = useState<Array<{ id: string; name: string; type: string }>>([]);
   const [libraryEnabledIds, setLibraryEnabledIds] = useState<Set<string>>(new Set());
   const [libraryEnableAll, setLibraryEnableAll] = useState(false);
   const [libraryHasEmby, setLibraryHasEmby] = useState(false);
@@ -251,28 +246,6 @@ export default function AdminUsersPage() {
     setLibraryEnableAll(false);
     setLibraryHasEmby(false);
 
-    // 获取用户的 NSFW 权限信息
-    try {
-      const res = await api.getUser(user.uid);
-      if (res.success && res.data) {
-        const nsfw = res.data.nsfw;
-        if (typeof nsfw === 'object' && nsfw !== null) {
-          setUserNsfwInfo({
-            enabled: nsfw.enabled || false,
-            has_permission: nsfw.has_permission || false,
-          });
-        } else {
-          setUserNsfwInfo({
-            enabled: nsfw || false,
-            has_permission: false,
-          });
-        }
-      }
-    } catch (error) {
-      console.error("获取用户NSFW信息失败:", error);
-      setUserNsfwInfo(null);
-    }
-
     // 获取该用户的媒体库可见性
     if (user.emby_id) {
       setLibraryLoading(true);
@@ -341,7 +314,6 @@ export default function AdminUsersPage() {
         toast({ title: "更新成功", variant: "success" });
         setEditOpen(false);
         setSelectedUser(null);
-        setUserNsfwInfo(null);
         invalidateUsersCache();
         loadUsers();
       } else {
@@ -349,37 +321,6 @@ export default function AdminUsersPage() {
       }
     } catch (error: any) {
       toast({ title: "更新失败", description: error.message, variant: "destructive" });
-    } finally {
-      setIsActionLoading(false);
-    }
-  };
-
-  const handleToggleNsfwPermission = async (grant: boolean) => {
-    if (!selectedUser) return;
-
-    setIsActionLoading(true);
-    try {
-      const res = await api.setUserNsfwPermission(selectedUser.uid, grant);
-      if (res.success) {
-        toast({
-          title: grant ? "已授予 NSFW 权限" : "已撤销 NSFW 权限",
-          variant: "success",
-        });
-        // 更新本地状态
-        if (userNsfwInfo) {
-          setUserNsfwInfo({
-            ...userNsfwInfo,
-            has_permission: grant,
-            enabled: grant ? userNsfwInfo.enabled : false, // 撤销权限时关闭显示
-          });
-        }
-        invalidateUsersCache();
-        loadUsers();
-      } else {
-        toast({ title: "操作失败", description: res.message, variant: "destructive" });
-      }
-    } catch (error: any) {
-      toast({ title: "操作失败", description: error.message, variant: "destructive" });
     } finally {
       setIsActionLoading(false);
     }
@@ -762,42 +703,6 @@ export default function AdminUsersPage() {
             {selectedUser?.emby_id && (
               <>
                 <Separator />
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div className="space-y-0.5">
-                      <Label>NSFW 库访问权限</Label>
-                      <p className="text-xs text-muted-foreground">
-                        控制用户是否可以访问 NSFW 媒体库
-                      </p>
-                    </div>
-                    <Switch
-                      checked={userNsfwInfo?.has_permission || false}
-                      onCheckedChange={handleToggleNsfwPermission}
-                      disabled={isActionLoading || !selectedUser?.emby_id}
-                    />
-                  </div>
-                  {userNsfwInfo && (
-                    <div className="rounded-lg bg-accent/50 p-3 text-xs">
-                      <p className="text-muted-foreground">
-                        权限状态:{" "}
-                        <span className="font-medium">
-                          {userNsfwInfo.has_permission ? "有权限" : "无权限"}
-                        </span>
-                      </p>
-                      <p className="text-muted-foreground mt-1">
-                        显示状态:{" "}
-                        <span className="font-medium">
-                          {userNsfwInfo.enabled ? "已启用" : "已禁用"}
-                        </span>
-                      </p>
-                      <p className="text-muted-foreground mt-1 text-[10px]">
-                        提示: 权限控制访问，显示状态由用户自己在设置中控制
-                      </p>
-                    </div>
-                  )}
-                </div>
-
-                <Separator />
 
                 {/* 媒体库可见性 */}
                 <div className="space-y-3">
@@ -844,11 +749,6 @@ export default function AdminUsersPage() {
                                   className="h-4 w-4 rounded"
                                 />
                                 <span className="text-sm truncate">{lib.name}</span>
-                                {lib.is_nsfw && (
-                                  <Badge variant="destructive" className="text-[10px] px-1.5 py-0">
-                                    NSFW
-                                  </Badge>
-                                )}
                               </div>
                               <span className="text-[10px] text-muted-foreground shrink-0">
                                 {lib.type || "—"}

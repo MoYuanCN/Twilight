@@ -43,7 +43,6 @@ class UserInfo:
     active: bool
     expire_status: str
     expired_at: int
-    nsfw_enabled: bool = False
     bgm_mode: bool = False
 
 

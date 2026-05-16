@@ -414,49 +414,6 @@ async def change_my_emby_password():
     return api_response(False, message, code=400)
 
 
-@users_bp.route('/me/nsfw', methods=['GET'])
-@require_auth
-async def get_nsfw_status():
-    """获取特殊媒体库的可见状态（单库模式）。
-
-    Response:
-        {
-            "success": true,
-            "data": {
-                "enabled": true,            # 当前是否可见
-                "has_permission": true,     # 管理员是否允许访问
-                "can_toggle": true,         # 是否可以自行切换
-                "library": {"name": "xxx", "enabled": true} | null,
-                "message": "..."
-            }
-        }
-    """
-    from src.services import EmbyService
-    user = g.current_user
-
-    nsfw_name = EmbyService.get_nsfw_library_name()
-    if not nsfw_name:
-        return api_response(True, "特殊媒体库未配置", {
-            'enabled': False,
-            'has_permission': False,
-            'can_toggle': False,
-            'library': None,
-            'message': '系统未配置特殊媒体库'
-        })
-
-    has_permission = bool(user.NSFW_ALLOWED)
-    enabled = bool(has_permission and user.NSFW)
-
-    return api_response(True, "获取成功", {
-        'enabled': enabled,
-        'has_permission': has_permission,
-        'can_toggle': has_permission,
-        'library': {'name': nsfw_name, 'enabled': enabled},
-        'message': '有访问权限，可自行开关' if has_permission
-        else '您没有特殊媒体库的访问权限，请联系管理员',
-    })
-
-
 @users_bp.route('/me/emby/bind', methods=['POST'])
 @require_auth
 async def bind_emby_account():
@@ -619,33 +576,6 @@ async def unbind_emby_account():
     logger.info(f"用户解绑 Emby 账号: {user.USERNAME} (原 Emby ID: {old_emby_id})")
     
     return api_response(True, "解绑成功")
-
-
-@users_bp.route('/me/nsfw', methods=['PUT'])
-@require_auth
-async def toggle_my_nsfw():
-    """切换特殊媒体库可见性（单库模式）。
-
-    Request:
-        {
-            "enable": true            # 是否显示特殊媒体库
-        }
-    """
-    from src.services import EmbyService
-
-    data = request.get_json() or {}
-    enable = bool(data.get('enable', False))
-    user = g.current_user
-
-    nsfw_name = EmbyService.get_nsfw_library_name()
-    if not nsfw_name:
-        return api_response(False, "系统未配置特殊媒体库", code=400)
-
-    if not user.NSFW_ALLOWED:
-        return api_response(False, "管理员未授予您特殊媒体库的访问权限，无法切换此选项", code=403)
-
-    success, message = await UserService.toggle_nsfw(user, enable)
-    return api_response(success, message)
 
 
 # ==================== 用户续期 ====================
@@ -1247,15 +1177,10 @@ async def get_my_settings():
     
     user = g.current_user
     
-    # 检查 NSFW 库是否配置
-    nsfw_library_id = await EmbyService.find_nsfw_library_id()
-    
     status = await EmbyService.get_user_status(user)
 
     return api_response(True, "获取成功", {
         # 用户设置
-        'nsfw_enabled': user.NSFW,
-        'nsfw_can_toggle': bool(user.NSFW_ALLOWED),
         'bgm_mode': user.BGM_MODE,
         'bgm_token_set': bool(user.BGM_TOKEN),
         'api_key_enabled': user.APIKEY_STATUS,
@@ -1277,7 +1202,6 @@ async def get_my_settings():
             'device_limit_enabled': DeviceLimitConfig.DEVICE_LIMIT_ENABLED,
             'max_devices': DeviceLimitConfig.MAX_DEVICES,
             'max_streams': DeviceLimitConfig.MAX_STREAMS,
-            'nsfw_library_configured': bool(nsfw_library_id),
         },
     })
 

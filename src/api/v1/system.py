@@ -126,15 +126,10 @@ async def _sync_admin_role_from_config():
                     demote.append(uid)
 
             if promote_admin:
-                # 升级为管理员时默认开放所有特殊媒体库访问与编辑权限
                 await session.execute(
                     update(UserModel)
                     .where(UserModel.UID.in_(promote_admin))
-                    .values(
-                        ROLE=Role.ADMIN.value,
-                        NSFW_ALLOWED=True,
-                        NSFW=True,
-                    )
+                    .values(ROLE=Role.ADMIN.value)
                 )
             if promote_white:
                 await session.execute(
@@ -325,7 +320,6 @@ async def get_admin_config():
         'emby': {
             'url': EmbyConfig.EMBY_URL,
             'url_list': EmbyConfig.EMBY_URL_LIST,
-            'nsfw_library': EmbyConfig.EMBY_NSFW,
         },
         'telegram': {
             'enabled': Config.TELEGRAM_MODE,
@@ -560,7 +554,6 @@ async def get_config_schema():
                     {'key': 'emby_password', 'label': '管理员密码', 'type': 'secret', 'description': 'Emby 管理员密码（API Key 无效时的备用认证）', 'value': EmbyConfig.EMBY_PASSWORD},
                     {'key': 'emby_url_list', 'label': '线路列表', 'type': 'list', 'description': '提供给用户的 Emby 服务器线路列表，格式: "线路名 : URL"', 'value': EmbyConfig.EMBY_URL_LIST},
                     {'key': 'emby_url_list_for_whitelist', 'label': '白名单线路列表', 'type': 'list', 'description': '白名单用户专用的 Emby 服务器线路列表', 'value': EmbyConfig.EMBY_URL_LIST_FOR_WHITELIST},
-                    {'key': 'emby_nsfw', 'label': '特殊媒体库', 'type': 'string', 'description': '特殊媒体库名称（单个，需要单独授权的成人内容库）', 'value': EmbyConfig.EMBY_NSFW},
                 ],
             },
             {
@@ -807,78 +800,6 @@ async def get_emby_libraries():
     
     libraries = await EmbyService.get_libraries_info()
     return api_response(True, "获取成功", libraries)
-
-
-@system_bp.route('/admin/emby/nsfw', methods=['PUT'])
-@require_auth
-@require_admin
-async def update_nsfw_library():
-    """更新 NSFW 库配置（管理员），支持多库"""
-    import toml
-    from pathlib import Path
-    from src.config import ROOT_PATH
-    from src.services.emby import get_emby_client, EmbyError
-
-    data = request.get_json() or {}
-    # 单库模式：支持 library_name 或 library_names（取第一个）
-    library_name = (data.get('library_name') or '').strip()
-    if not library_name:
-        names = data.get('library_names') or []
-        if isinstance(names, str):
-            names = [names]
-        for n in names:
-            if isinstance(n, str) and n.strip():
-                library_name = n.strip()
-                break
-
-    config_file = ROOT_PATH / 'config.toml'
-    if not config_file.exists():
-        return api_response(False, "配置文件不存在", code=404)
-
-    # 校验库名在 Emby 中存在（允许空字符串清空配置）
-    if library_name:
-        try:
-            emby = get_emby_client()
-            libraries = await emby.get_libraries()
-            emby_names = {lib.name.strip().lower() for lib in libraries}
-            if library_name.lower() not in emby_names:
-                return api_response(False, f"Emby 中不存在该媒体库: {library_name}", code=400)
-        except EmbyError as e:
-            return api_response(False, f"无法连接 Emby 验证媒体库: {e}", code=500)
-
-    try:
-        config = toml.load(config_file)
-        if 'Emby' not in config:
-            config['Emby'] = {}
-        config['Emby']['emby_nsfw'] = library_name
-
-        backup_file = ROOT_PATH / 'config.toml.backup'
-        if config_file.exists():
-            import shutil
-            shutil.copy2(config_file, backup_file)
-
-        with open(config_file, 'w', encoding='utf-8') as f:
-            toml.dump(config, f)
-
-        EmbyConfig.update_from_toml('Emby')
-
-        return api_response(True, "特殊媒体库配置已更新", {
-            'nsfw_library_name': library_name,
-        })
-    except Exception as e:
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.error(f"更新特殊媒体库配置失败: {e}", exc_info=True)
-
-        backup_file = ROOT_PATH / 'config.toml.backup'
-        if backup_file.exists():
-            try:
-                import shutil
-                shutil.copy2(backup_file, config_file)
-            except Exception:
-                pass
-
-        return api_response(False, f"更新配置失败: {e}", code=500)
 
 
 # ==================== Bot 连通性测试 ====================

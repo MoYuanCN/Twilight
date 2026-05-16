@@ -98,8 +98,8 @@ Twilight/
 ### 1. Emby 媒体库访问策略（`apply_library_policy`）
 
 `src/services/emby.py::EmbyClient.apply_library_policy` 是用户媒体库可见性的**唯一**写入入口。
-所有需要变更媒体库访问的逻辑（用户自助 NSFW 切换、`sync_user_to_emby`、管理员
-`set_user_library_access` / `set_user_nsfw_permission`）都必须通过它。
+所有需要变更媒体库访问的逻辑（`sync_user_to_emby`、管理员 `set_user_library_access`）
+都必须通过它。
 
 实现要点：
 

@@ -8,7 +8,7 @@ API Key 专用接口
   account:read  - 读取账号信息、状态
   account:write - 启用/禁用/续期账号
   emby:read     - 读取 Emby 状态
-  emby:write    - 控制 Emby 账户（NSFW 等）
+  emby:write    - 控制 Emby 账户
 """
 import json
 from functools import wraps
@@ -592,86 +592,6 @@ async def kick_emby_sessions():
             'kicked_count': kicked,
         })
     return api_response(False, "操作失败", code=500)
-
-# ==================== NSFW 库管理 ====================
-
-@apikey_bp.route('/emby/nsfw', methods=['GET'])
-@require_apikey
-@require_permission('emby:read')
-async def get_nsfw_status():
-    """
-    获取 NSFW 库状态
-    
-    Headers:
-        X-API-Key: <your_api_key>
-    
-    Response:
-        {
-            "success": true,
-            "data": {
-                "enabled": true,
-                "has_permission": true,
-                "nsfw_library_name": "xxx",
-                "can_toggle": true
-            }
-        }
-    """
-    user = g.current_user
-
-    nsfw_library_name = EmbyService.get_nsfw_library_name()
-    nsfw_library_id = await EmbyService.find_nsfw_library_id()
-
-    if not nsfw_library_id:
-        return api_response(True, "NSFW 库未配置", {
-            'enabled': False,
-            'has_permission': False,
-            'nsfw_library_name': None,
-            'can_toggle': False,
-        })
-
-    return api_response(True, "获取成功", {
-        'enabled': user.NSFW,
-        'has_permission': bool(user.NSFW_ALLOWED),
-        'nsfw_library_name': nsfw_library_name,
-        'can_toggle': bool(user.NSFW_ALLOWED),
-    })
-
-
-@apikey_bp.route('/emby/nsfw', methods=['PUT'])
-@require_apikey
-@require_permission('emby:write')
-async def toggle_nsfw():
-    """
-    切换 NSFW 库访问
-    
-    Headers:
-        X-API-Key: <your_api_key>
-    
-    Request:
-        {
-            "enable": true
-        }
-    
-    Response:
-        {
-            "success": true,
-            "message": "NSFW 已开启"
-        }
-    """
-    user = g.current_user
-    data = request.get_json() or {}
-    enable = data.get('enable', False)
-
-    nsfw_library_id = await EmbyService.find_nsfw_library_id()
-    if not nsfw_library_id:
-        return api_response(False, "系统未配置 NSFW 媒体库", code=400)
-
-    if not user.NSFW_ALLOWED:
-        return api_response(False, "管理员未授予您 NSFW 库的访问权限", code=403)
-
-    success, message = await UserService.toggle_nsfw(user, enable)
-    return api_response(success, message)
-
 
 # ==================== 注册码/续期码 ====================
 

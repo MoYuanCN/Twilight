@@ -19,7 +19,6 @@ import {
   Sun,
   TestTube,
   FileCode,
-  Library,
   Server,
   Megaphone,
 } from "lucide-react";
@@ -53,7 +52,6 @@ export const adminNavItems: SidebarNavItem[] = [
   { href: "/admin/telegram-rebind-requests", label: "Telegram 换绑", icon: MessageSquare },
   { href: "/admin/emby", label: "Emby 管理", icon: Server },
   { href: "/admin/config", label: "配置管理", icon: FileCode },
-  { href: "/admin/nsfw", label: "NSFW 库管理", icon: Library },
   { href: "/admin/test", label: "服务器信息", icon: TestTube },
 ];
 

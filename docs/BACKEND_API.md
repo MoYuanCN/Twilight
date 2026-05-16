@@ -449,62 +449,6 @@ curl -X POST "http://localhost:5000/api/v1/users/me/emby/unbind" \
   -H "Authorization: Bearer <token>"
 ```
 
-#### 查询 NSFW 访问状态
-
-`GET /users/me/nsfw`
-
-- 说明：查询当前用户的 NSFW 媒体库可见状态（含每个 NSFW 库的独立开关）
-- 认证：登录 Token
-- 响应体：
-
-```json
-{
-  "success": true,
-  "data": {
-    "enabled": true,
-    "has_permission": true,
-    "can_toggle": true,
-    "libraries": [
-      {"name": "里番", "enabled": false},
-      {"name": "无修", "enabled": true}
-    ],
-    "message": "有访问权限，可自行开关"
-  }
-}
-```
-
-- 示例 cURL：
-
-```bash
-curl -X GET "http://localhost:5000/api/v1/users/me/nsfw" \
-  -H "Authorization: Bearer <token>"
-```
-
-#### 切换 NSFW 库可见性
-
-`PUT /users/me/nsfw`
-
-- 说明：开启/关闭指定 NSFW 媒体库的可见性。未指定 `library_names` 时操作全部 NSFW 库。
-  实际写入由 `apply_library_policy` 走单次 `POST /Users/{Id}/Policy` 完成。
-- 认证：登录 Token
-- 请求体：
-
-```json
-{
-  "enable": false,
-  "library_names": ["里番"]
-}
-```
-
-- 示例 cURL：
-
-```bash
-curl -X PUT "http://localhost:5000/api/v1/users/me/nsfw" \
-  -H "Authorization: Bearer <token>" \
-  -H "Content-Type: application/json" \
-  -d '{"enable":false,"library_names":["里番"]}'
-```
-
 ### 6.4 续期与注册码/续期码
 
 #### 管理员续期用户
@@ -1148,7 +1092,7 @@ curl -X POST "http://localhost:5000/api/v1/admin/users/123/kick" \
 
 ```json
 {
-  "all_libraries": [{"id": "xxx", "name": "电影", "type": "movies", "is_nsfw": false}],
+  "all_libraries": [{"id": "xxx", "name": "电影", "type": "movies"}],
   "enabled_ids": ["xxx", "yyy"],
   "enable_all": false,
   "has_emby": true
@@ -1188,30 +1132,6 @@ curl -X PUT "http://localhost:5000/api/v1/admin/users/123/libraries" \
   -H "Authorization: Bearer <admin_token>" \
   -H "Content-Type: application/json" \
   -d '{"library_names":["电影","电视剧"],"enable_all":false}'
-```
-
-#### 更新用户 NSFW 权限
-
-`PUT /admin/users/<int:uid>/nsfw`
-
-- 认证：管理员 Token
-- 说明：授予 / 撤销用户访问所有 NSFW 媒体库的权限。
-  撤销时会清空用户偏好集合并隐藏所有 NSFW 库。
-- 请求体：
-
-```json
-{
-  "grant": true
-}
-```
-
-- 示例 cURL：
-
-```bash
-curl -X PUT "http://localhost:5000/api/v1/admin/users/123/nsfw" \
-  -H "Authorization: Bearer <admin_token>" \
-  -H "Content-Type: application/json" \
-  -d '{"grant":true}'
 ```
 
 #### 切换管理员身份

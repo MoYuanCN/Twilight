@@ -118,36 +118,20 @@ async def update_my_info():
 @require_admin
 async def get_user(uid: int):
     """获取用户详情"""
-    from src.config import EmbyConfig
-    
     user = await UserOperate.get_user_by_uid(uid)
     if not user:
         return api_response(False, "用户不存在", code=404)
     
     user_info = await UserService.get_user_info(user)
     status = await EmbyService.get_user_status(user)
-    
-    # 获取 NSFW 权限信息
-    nsfw_library_name = EmbyService.get_nsfw_library_name()
-    nsfw_library_id = await EmbyService.find_nsfw_library_id()
-    has_nsfw_permission = False
-    if nsfw_library_id and user.EMBYID:
-        library_ids, enable_all = await EmbyService.get_user_library_access(user)
-        has_nsfw_permission = enable_all or (nsfw_library_id in library_ids)
-    
+
     user_info['emby_status'] = {
         'is_synced': status.is_synced,
         'is_active': status.is_active,
         'active_sessions': status.active_sessions,
         'message': status.message,
     }
-    
-    user_info['nsfw'] = {
-        'enabled': user.NSFW,
-        'has_permission': user.NSFW_ALLOWED,
-        'nsfw_library_name': nsfw_library_name,
-    }
-    
+
     return api_response(True, "获取成功", user_info)
 
 
@@ -334,7 +318,7 @@ async def get_user_libraries(uid: int):
 
     Response:
         {
-            "all_libraries": [{"id": "...", "name": "...", "type": "...", "is_nsfw": bool}],
+            "all_libraries": [{"id": "...", "name": "...", "type": "..."}],
             "enabled_ids": ["id1", "id2"],
             "enable_all": false
         }
@@ -398,66 +382,6 @@ async def set_user_libraries(uid: int):
     return api_response(success, message)
 
 
-@admin_bp.route('/users/<int:uid>/nsfw', methods=['PUT'])
-@require_auth
-@require_admin
-async def set_user_nsfw_permission(uid: int):
-    """
-    设置用户 NSFW 库访问权限（管理员）
-    
-    Request:
-        {
-            "grant": true  // true=授予权限, false=撤销权限
-        }
-    """
-    from src.config import EmbyConfig
-    from src.services.emby import get_emby_client
-    
-    user = await UserOperate.get_user_by_uid(uid)
-    if not user:
-        return api_response(False, "用户不存在", code=404)
-    
-    if not user.EMBYID:
-        return api_response(False, "用户未绑定 Emby 账户", code=400)
-    
-    # 单库模式：通过名称查找 NSFW 库（不存在时禁用接口）
-    nsfw_name = EmbyService.get_nsfw_library_name()
-    if not nsfw_name:
-        return api_response(False, "系统未配置特殊媒体库", code=400)
-
-    data = request.get_json() or {}
-    grant = bool(data.get('grant', True))
-
-    try:
-        import json as _json
-
-        user.NSFW_ALLOWED = grant
-        # 授予 → 默认开启可见；撤销 → 关闭可见
-        user.NSFW = grant
-
-        other_data: dict = {}
-        if user.OTHER:
-            try:
-                other_data = _json.loads(user.OTHER)
-                if not isinstance(other_data, dict):
-                    other_data = {}
-            except (ValueError, TypeError):
-                other_data = {}
-        other_data['nsfw_libraries'] = [nsfw_name] if grant else []
-        user.OTHER = _json.dumps(other_data)
-        await UserOperate.update_user(user)
-
-        success, message = await UserService.sync_user_to_emby(user)
-        if success:
-            status_msg = "已授予" if grant else "已撤销"
-            return api_response(True, f"{status_msg}特殊媒体库访问权限")
-        return api_response(False, f"同步到 Emby 失败: {message}", code=500)
-
-    except Exception as e:
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.error(f"设置用户特殊媒体库权限失败: {e}", exc_info=True)
-        return api_response(False, f"操作失败: {e}", code=500)
 
 
 @admin_bp.route('/users/<int:uid>/admin', methods=['PUT'])

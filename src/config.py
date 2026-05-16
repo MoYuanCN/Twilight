@@ -249,7 +249,6 @@ class EmbyConfig(BaseConfig):
         'Direct : http://127.0.0.1:8096/',
         'Sample : http://192.168.1.1:8096/'
     ]
-    EMBY_NSFW: str = ''  # 特殊媒体库名称（单个，仅允许设置一个）
 
 
 class TelegramConfig(BaseConfig):
@@ -366,16 +365,6 @@ class BangumiSyncConfig(BaseConfig):
 # 自动加载配置
 Config.update_from_toml("Global")
 EmbyConfig.update_from_toml('Emby')
-# 兼容旧配置：之前 emby_nsfw 可能是 list/逗号分隔字符串，统一收敛为单个名称
-_raw_nsfw = EmbyConfig.EMBY_NSFW
-if isinstance(_raw_nsfw, (list, tuple)):
-    _candidate = next((str(n).strip() for n in _raw_nsfw if str(n).strip()), '')
-    EmbyConfig.EMBY_NSFW = _candidate
-elif isinstance(_raw_nsfw, str):
-    # 逗号分隔时只保留第一个
-    EmbyConfig.EMBY_NSFW = next((n.strip() for n in _raw_nsfw.split(',') if n.strip()), '')
-else:
-    EmbyConfig.EMBY_NSFW = ''
 TelegramConfig.update_from_toml('Telegram')
 RegisterConfig.update_from_toml('SAR')
 DeviceLimitConfig.update_from_toml('DeviceLimit')

@@ -37,43 +37,6 @@ class EmbyUserStatus:
 
 class EmbyService:
     """Emby 业务服务"""
-    
-    @staticmethod
-    def get_nsfw_library_name() -> Optional[str]:
-        """获取配置的特殊媒体库名称（单个）。
-
-        参考 Sakura_embyboss：系统只支持设置**一个** NSFW 媒体库。
-        """
-        from src.config import EmbyConfig
-        raw = EmbyConfig.EMBY_NSFW
-        if isinstance(raw, str):
-            cleaned = raw.strip()
-            return cleaned or None
-        # 兼容历史 list/tuple
-        if isinstance(raw, (list, tuple)):
-            for item in raw:
-                if isinstance(item, str) and item.strip():
-                    return item.strip()
-        return None
-
-    @staticmethod
-    async def find_nsfw_library_id() -> Optional[str]:
-        """根据配置名称查找 NSFW 库的 GUID。未配置或未找到时返回 None。"""
-        name = EmbyService.get_nsfw_library_name()
-        if not name:
-            return None
-
-        emby = get_emby_client()
-        try:
-            libraries = await emby.get_libraries()
-            for lib in libraries:
-                if (lib.name or '').strip().lower() == name.lower():
-                    return lib.id
-            logger.warning(f"未找到名为 '{name}' 的 NSFW 库")
-            return None
-        except EmbyError as e:
-            logger.error(f"查找 NSFW 库失败: {e}")
-            return None
 
     # ==================== 用户同步 ====================
 
@@ -121,8 +84,7 @@ class EmbyService:
         - 检测并清理孤儿记录（Emby 用户已删除但 DB 仍有 EMBYID）
         - 同步用户名不一致的情况
         - 同步启用/禁用状态
-        - 同步 NSFW 权限
-        
+
         :return: (成功数, 失败数, 错误列表)
         """
         emby = get_emby_client()
@@ -373,19 +335,14 @@ class EmbyService:
         try:
             libraries = await emby.get_libraries()
             result = []
-            
-            # 通过名称判断 NSFW 库（系统仅支持单个 NSFW 库）
-            nsfw_name = EmbyService.get_nsfw_library_name()
-            nsfw_lower = nsfw_name.lower() if nsfw_name else None
 
             for lib in libraries:
                 result.append({
                     'id': lib.id,
                     'name': lib.name,
                     'type': lib.collection_type,
-                    'is_nsfw': nsfw_lower is not None and lib.name.strip().lower() == nsfw_lower,
                 })
-            
+
             return result
         except EmbyError as e:
             logger.error(f"获取媒体库失败: {e}")

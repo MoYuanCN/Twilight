@@ -45,7 +45,7 @@ API Key 支持细粒度权限控制，部分接口只在特定权限下可用。
 | `account:read` | 读取账号信息、状态 |
 | `account:write` | 启用 / 禁用 / 续期账号 |
 | `emby:read` | 查看 Emby 状态 |
-| `emby:write` | 处理 Emby 会话、NSFW 操作 |
+| `emby:write` | 处理 Emby 会话 |
 
 ### 4.2 权限不足时返回
 
@@ -75,7 +75,6 @@ API Key 支持细粒度权限控制，部分接口只在特定权限下可用。
 | `/emby/status` | `emby:read` |
 | `/emby/kick` | `emby:write` |
 | `/permissions` | 无（仅需有效 API Key） |
-| `/emby/nsfw` | `emby:write` |
 | `/use-code` | `account:write` |
 
 ## 5. 关键接口
@@ -260,48 +259,7 @@ curl -X POST "https://your-domain.com/api/v1/apikey/emby/kick" \
   -H "X-API-Key: key-xxxxxxxxxxxxxxxx-yyyyyyyy"
 ```
 
-### 5.5 NSFW 与注册码/续期码
-
-#### 查询 NSFW 状态
-
-`GET /api/v1/apikey/emby/nsfw`
-
-- 认证：API Key
-- 请求头：
-  - `X-API-Key: key-xxxxxxxxxxxxxxxx-yyyyyyyy`
-- 说明：检查账号的 NSFW 访问权限。
-- 示例 cURL：
-
-```bash
-curl -X GET "https://your-domain.com/api/v1/apikey/emby/nsfw" \
-  -H "X-API-Key: key-xxxxxxxxxxxxxxxx-yyyyyyyy"
-```
-
-#### 切换 NSFW 权限
-
-`PUT /api/v1/apikey/emby/nsfw`
-
-- 认证：API Key
-- 请求头：
-  - `X-API-Key: key-xxxxxxxxxxxxxxxx-yyyyyyyy`
-  - `Content-Type: application/json`
-- 请求体：
-
-```json
-{
-  "enable": true
-}
-```
-
-- 说明：启用或禁用 NSFW 访问权限。
-- 示例 cURL：
-
-```bash
-curl -X PUT "https://your-domain.com/api/v1/apikey/emby/nsfw" \
-  -H "X-API-Key: key-xxxxxxxxxxxxxxxx-yyyyyyyy" \
-  -H "Content-Type: application/json" \
-  -d '{"enable":true}'
-```
+### 5.5 注册码/续期码
 
 #### 使用注册码/续期码
 

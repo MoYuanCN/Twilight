@@ -47,7 +47,6 @@ export const useAuthStore = create<AuthState>()(
               emby_id: baseUser.emby_id,
               avatar: baseUser.avatar,
               bgm_mode: baseUser.bgm_mode ?? false,
-              nsfw: baseUser.nsfw ?? false,
               created_at: baseUser.created_at || new Date().toISOString(),
               telegram_id: baseUser.telegram_id,
               telegram_username: baseUser.telegram_username,
