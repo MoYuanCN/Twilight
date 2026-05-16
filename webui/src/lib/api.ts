@@ -1125,10 +1125,15 @@ export interface MediaRequest {
 }
 
 export interface EmbyInfo {
-  server_name: string;
-  version: string;
+  server_name?: string;
+  version?: string;
   user_id?: string;
   user_name?: string;
+  online?: boolean;
+  active_sessions?: number;
+  total_sessions?: number;
+  operating_system?: string;
+  message?: string;
 }
 
 export interface EmbySession {
