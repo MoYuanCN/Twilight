@@ -39,6 +39,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { useAsyncResource } from "@/hooks/use-async-resource";
 import { api, type Announcement } from "@/lib/api";
 
@@ -96,6 +97,7 @@ function localInputToUnix(value: string): number {
 
 export default function AdminAnnouncementsPage() {
   const { toast } = useToast();
+  const { confirm } = useConfirm();
   const [items, setItems] = useState<Announcement[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -186,7 +188,13 @@ export default function AdminAnnouncementsPage() {
   };
 
   const handleDelete = async (id: number) => {
-    if (!window.confirm("确认删除此公告？删除后无法恢复。")) return;
+    const ok = await confirm({
+      title: "删除公告？",
+      description: "公告会被永久删除，且无法恢复。",
+      tone: "danger",
+      confirmLabel: "删除",
+    });
+    if (!ok) return;
     try {
       const res = await api.adminDeleteAnnouncement(id);
       if (res.success) {

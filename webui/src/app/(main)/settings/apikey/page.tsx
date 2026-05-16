@@ -24,6 +24,7 @@ import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { api } from "@/lib/api";
 import { useAsyncResource } from "@/hooks/use-async-resource";
 import {
@@ -61,6 +62,7 @@ function isNormalOps(k: { allow_query: boolean }) {
 
 export default function ApiKeyPage() {
   const { toast } = useToast();
+  const { confirm } = useConfirm();
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
   const [isSaving, setIsSaving] = useState(false);
 
@@ -157,7 +159,13 @@ export default function ApiKeyPage() {
   };
 
   const handleDeleteKey = async (keyId: number) => {
-    if (!window.confirm("确定要删除此 API Key？删除后无法恢复。")) return;
+    const ok = await confirm({
+      title: "删除 API Key？",
+      description: "删除后该 Key 将立即失效，且无法恢复。",
+      tone: "danger",
+      confirmLabel: "删除",
+    });
+    if (!ok) return;
     setIsSaving(true);
     try {
       const res = await api.deleteMyApiKey(keyId);

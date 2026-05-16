@@ -3,6 +3,7 @@ import { GeistSans } from "geist/font/sans";
 import { GeistMono } from "geist/font/mono";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Toaster } from "@/components/ui/toaster";
+import { ConfirmDialogProvider } from "@/components/ui/confirm-dialog";
 import { SITE_DESCRIPTION, SITE_ICON, SITE_TITLE } from "../lib/site-config";
 import "./globals.css";
 
@@ -37,8 +38,10 @@ export default function RootLayout({
           themes={["light", "dark"]}
           disableTransitionOnChange={false}
         >
-          {children}
-          <Toaster />
+          <ConfirmDialogProvider>
+            {children}
+            <Toaster />
+          </ConfirmDialogProvider>
         </ThemeProvider>
       </body>
     </html>

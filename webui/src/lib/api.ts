@@ -470,8 +470,15 @@ class ApiClient {
     });
   }
 
-  async deleteUser(uid: number) {
-    return this.request(`/admin/users/${uid}`, {
+  async deleteUser(uid: number, options?: { deleteEmby?: boolean }) {
+    const deleteEmby = options?.deleteEmby ?? true;
+    return this.request(`/admin/users/${uid}?delete_emby=${deleteEmby}`, {
+      method: "DELETE",
+    });
+  }
+
+  async deleteUserEmby(uid: number) {
+    return this.request(`/admin/users/${uid}/emby`, {
       method: "DELETE",
     });
   }

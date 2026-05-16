@@ -49,6 +49,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { useAsyncResource } from "@/hooks/use-async-resource";
 import { PageError } from "@/components/layout/page-state";
 import { api, type UserInfo } from "@/lib/api";
@@ -56,6 +57,7 @@ import { formatDate } from "@/lib/utils";
 
 export default function AdminUsersPage() {
   const { toast } = useToast();
+  const { confirmAction } = useConfirm();
   const [users, setUsers] = useState<UserInfo[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -214,21 +216,47 @@ export default function AdminUsersPage() {
   };
 
   const handleDelete = async (user: UserInfo) => {
-    if (!confirm(`确定要删除用户 ${user.username} 吗？此操作不可恢复。`)) {
-      return;
-    }
+    const hasEmby = Boolean(user.emby_id);
+    const choice = await confirmAction({
+      title: `删除用户 ${user.username}？`,
+      description: hasEmby
+        ? "请选择要执行的操作。本地账户的删除不可恢复。"
+        : "本地账户的删除不可恢复。该用户未绑定 Emby 账户。",
+      tone: "danger",
+      actions: hasEmby
+        ? [
+            { label: "同时删除 Emby 账户", variant: "destructive", value: "with_emby" },
+            { label: "仅删除本地账户", variant: "outline", value: "local_only" },
+            { label: "仅删除 Emby 账户", variant: "outline", value: "emby_only" },
+          ]
+        : [
+            { label: "删除本地账户", variant: "destructive", value: "local_only" },
+          ],
+    });
+    if (!choice) return;
 
     try {
-      const res = await api.deleteUser(user.uid);
+      let res;
+      if (choice === "emby_only") {
+        res = await api.deleteUserEmby(user.uid);
+      } else {
+        res = await api.deleteUser(user.uid, { deleteEmby: choice === "with_emby" });
+      }
+
       if (res.success) {
-        toast({ title: "用户已删除", variant: "success" });
+        const successTitles: Record<string, string> = {
+          with_emby: "用户与 Emby 账户已删除",
+          local_only: "用户已删除",
+          emby_only: "Emby 账户已删除",
+        };
+        toast({ title: successTitles[choice] ?? "操作成功", variant: "success" });
         invalidateUsersCache();
         loadUsers();
       } else {
-        toast({ title: "删除失败", description: res.message, variant: "destructive" });
+        toast({ title: "操作失败", description: res.message, variant: "destructive" });
       }
     } catch (error: any) {
-      toast({ title: "删除失败", description: error.message, variant: "destructive" });
+      toast({ title: "操作失败", description: error.message, variant: "destructive" });
     }
   };
 

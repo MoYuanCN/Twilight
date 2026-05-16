@@ -35,11 +35,13 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { api, type MediaItem, type MediaDetail, type InventoryCheckResult, type MediaRequest } from "@/lib/api";
 import { formatRelativeTime, cn } from "@/lib/utils";
 
 export default function MediaPage() {
   const { toast } = useToast();
+  const { confirm } = useConfirm();
   const [searchQuery, setSearchQuery] = useState("");
   const [source, setSource] = useState("all");
   const [searchMode, setSearchMode] = useState<"name" | "id">("name"); // 搜索模式：名称或ID
@@ -330,7 +332,13 @@ export default function MediaPage() {
   };
 
   const handleDelete = async (id: number) => {
-    if (!confirm("确定要删除这条求片请求吗？")) return;
+    const ok = await confirm({
+      title: "删除求片请求？",
+      description: "该操作不可恢复。",
+      tone: "danger",
+      confirmLabel: "删除",
+    });
+    if (!ok) return;
 
     try {
       const res = await api.deleteMediaRequest(id);

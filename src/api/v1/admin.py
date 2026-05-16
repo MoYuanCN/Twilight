@@ -231,18 +231,37 @@ async def update_user(uid: int):
 async def delete_user(uid: int):
     """
     删除用户
-    
-    Query:
+
+    Query / Body:
         delete_emby: bool - 是否同时删除 Emby 账户（默认 true）
     """
     user = await UserOperate.get_user_by_uid(uid)
     if not user:
         return api_response(False, "用户不存在", code=404)
-    
-    delete_emby = request.args.get('delete_emby', 'true').lower() == 'true'
-    
+
+    # 优先读取 JSON body，回退到 query string
+    body = request.get_json(silent=True) or {}
+    raw = body.get('delete_emby', request.args.get('delete_emby', 'true'))
+    delete_emby = str(raw).lower() not in ('false', '0', 'no')
+
     success, message = await UserService.delete_user(user, delete_emby)
     return api_response(success, message)
+
+
+@admin_bp.route('/users/<int:uid>/emby', methods=['DELETE'])
+@require_auth
+@require_admin
+async def delete_user_emby(uid: int):
+    """仅删除该用户绑定的 Emby 账户，本地账户保留。"""
+    user = await UserOperate.get_user_by_uid(uid)
+    if not user:
+        return api_response(False, "用户不存在", code=404)
+
+    if user.ROLE == Role.ADMIN.value and user.UID != g.current_user.UID:
+        return api_response(False, "不允许操作其他管理员的 Emby 账户", code=403)
+
+    success, message = await UserService.delete_emby_only(user)
+    return api_response(success, message, code=200 if success else 400)
 
 
 @admin_bp.route('/users/<int:uid>/renew', methods=['POST'])

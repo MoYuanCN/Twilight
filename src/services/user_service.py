@@ -653,7 +653,7 @@ class UserService:
     async def delete_user(user: UserModel, delete_emby: bool = True) -> Tuple[bool, str]:
         """
         删除用户
-        
+
         :param user: 用户对象
         :param delete_emby: 是否同时删除 Emby 账户
         """
@@ -662,15 +662,45 @@ class UserService:
             if delete_emby and user.EMBYID:
                 emby = get_emby_client()
                 await emby.delete_user(user.EMBYID)
-            
+
             # 删除用户记录
             await UserOperate.delete_user(user)
-            
+
             logger.info(f"用户已删除: {user.USERNAME}")
             return True, "用户已删除"
         except Exception as e:
             logger.error(f"删除用户失败: {e}")
             return False, f"删除失败: {e}"
+
+    @staticmethod
+    async def delete_emby_only(user: UserModel) -> Tuple[bool, str]:
+        """删除用户在 Emby 中的账号，但保留本地账户。"""
+        if not user.EMBYID:
+            return False, "用户未绑定 Emby 账户"
+
+        old_emby_id = user.EMBYID
+        try:
+            emby = get_emby_client()
+            ok = await emby.delete_user(old_emby_id)
+            if not ok:
+                return False, "删除 Emby 账户失败"
+        except Exception as e:
+            logger.error(f"删除 Emby 账户失败: {e}", exc_info=True)
+            return False, f"删除 Emby 账户失败: {e}"
+
+        user.EMBYID = None
+        if user.OTHER:
+            try:
+                other_data = json.loads(user.OTHER)
+            except (json.JSONDecodeError, TypeError):
+                other_data = {}
+            if isinstance(other_data, dict):
+                other_data.pop('emby_username', None)
+                user.OTHER = json.dumps(other_data) if other_data else ''
+        await UserOperate.update_user(user)
+
+        logger.info(f"已删除 Emby 账户: {user.USERNAME} (原 Emby ID: {old_emby_id})")
+        return True, "Emby 账户已删除，本地账户已保留"
 
     @staticmethod
     async def use_code(

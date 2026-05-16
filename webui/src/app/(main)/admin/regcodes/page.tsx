@@ -36,6 +36,7 @@ import {
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { useAsyncResource } from "@/hooks/use-async-resource";
 import { PageError } from "@/components/layout/page-state";
 import { api, type Regcode } from "@/lib/api";
@@ -43,6 +44,7 @@ import { formatDate } from "@/lib/utils";
 
 export default function AdminRegcodesPage() {
   const { toast } = useToast();
+  const { confirm } = useConfirm();
   const [regcodes, setRegcodes] = useState<Regcode[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -128,7 +130,13 @@ export default function AdminRegcodesPage() {
   };
 
   const handleDelete = async (code: string) => {
-    if (!confirm("确定要删除这个卡码吗？")) return;
+    const ok = await confirm({
+      title: "删除卡码？",
+      description: `卡码 ${code} 将被立即删除，且无法恢复。`,
+      tone: "danger",
+      confirmLabel: "删除",
+    });
+    if (!ok) return;
 
     try {
       const res = await api.deleteRegcode(code);
