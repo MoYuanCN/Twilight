@@ -10,6 +10,18 @@
     "directory": ".open-next/assets",
     "binding": "ASSETS"
   },
+  // Worker 运行时环境变量。两组同义键都会被前端识别：
+  //   - 无前缀（SITE_NAME 等）：由 `generateMetadata` 在请求时读取，改完无需重新构建。
+  //   - NEXT_PUBLIC_* 前缀：在 `next build` 时被静态内联到客户端 bundle；
+  //     仅在你需要客户端组件直接拿到（如 SITE_NAME 常量）时使用。
+  // 推荐做法：把网站名、标题、描述、图标都放在「无前缀」一侧，便于改动后秒生效；
+  // NEXT_PUBLIC_API_URL 仍走构建期注入，由 Cloudflare Pages/Workers Build 的 env 提供。
+  "vars": {
+    "SITE_NAME": "",
+    "SITE_TITLE": "",
+    "SITE_DESCRIPTION": "",
+    "SITE_ICON": ""
+  },
   "services": [
     {
       "binding": "WORKER_SELF_REFERENCE",
