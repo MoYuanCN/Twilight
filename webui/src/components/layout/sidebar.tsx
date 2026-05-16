@@ -21,6 +21,7 @@ import {
   FileCode,
   Server,
   Megaphone,
+  TimerReset,
 } from "lucide-react";
 import { useTheme } from "next-themes";
 import { Button } from "@/components/ui/button";
@@ -51,6 +52,7 @@ export const adminNavItems: SidebarNavItem[] = [
   { href: "/admin/requests", label: "求片审核", icon: Film },
   { href: "/admin/telegram-rebind-requests", label: "Telegram 换绑", icon: MessageSquare },
   { href: "/admin/emby", label: "Emby 管理", icon: Server },
+  { href: "/admin/scheduler", label: "定时任务", icon: TimerReset },
   { href: "/admin/config", label: "配置管理", icon: FileCode },
   { href: "/admin/test", label: "服务器信息", icon: TestTube },
 ];

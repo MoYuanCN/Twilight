@@ -581,6 +581,19 @@ class ApiClient {
     return this.request<{ apis: Array<{ method: string; path: string; endpoint: string; full_path: string }>; total: number }>("/system/admin/apis");
   }
 
+  // ==================== 定时任务管理 ====================
+
+  async listSchedulerJobs() {
+    return this.request<{ jobs: SchedulerJobItem[] }>(`/admin/scheduler/jobs`);
+  }
+
+  async triggerSchedulerJob(jobId: string) {
+    return this.request<{ job_id: string; last_run: SchedulerJobRun | null }>(
+      `/admin/scheduler/jobs/${encodeURIComponent(jobId)}/run`,
+      { method: "POST" },
+    );
+  }
+
   async syncAllEmbyUsers() {
     return this.request<{ success: number; failed: number; errors: string[] }>("/admin/emby/sync", {
       method: "POST",
@@ -1320,6 +1333,25 @@ export interface ConfigSection {
 
 export interface ConfigSchema {
   sections: ConfigSection[];
+}
+
+
+export interface SchedulerJobRun {
+  status: "running" | "success" | "failed";
+  started_at: number;
+  finished_at: number | null;
+  error: string | null;
+}
+
+export interface SchedulerJobItem {
+  id: string;
+  name: string;
+  description: string;
+  enabled: boolean;
+  schedule: string | null;
+  next_run_at: number | null;
+  last_run: SchedulerJobRun | null;
+  is_running: boolean;
 }
 
 

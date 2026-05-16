@@ -1,4 +1,8 @@
+import asyncio
 import logging
+import time
+from typing import Awaitable, Callable, Optional
+
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from src.config import RegisterConfig, SchedulerConfig, TelegramConfig
 from src.db.user import UserOperate
@@ -8,8 +12,200 @@ from src.services.user_service import UserService
 
 logger = logging.getLogger(__name__)
 
+
 class SchedulerService:
     _scheduler = None
+    _scheduler_loop: Optional[asyncio.AbstractEventLoop] = None
+    # 每个 job 的最近一次执行情况：{ job_id: {status, started_at, finished_at, error} }
+    _last_runs: dict[str, dict] = {}
+    # 当前正在「运行中」的 job ID（用于幂等避免重复触发）
+    _running: set[str] = set()
+
+    # ============== Job 元数据注册表（用于前端列表 / 手动触发权限） ==============
+    # 每条目: id, name, description, manual(是否允许手动触发)
+    JOB_DEFINITIONS = [
+        {
+            'id': 'check_expired',
+            'name': '过期用户检查',
+            'description': '查找已过期账号，禁用本地状态并同步禁用 Emby 账户。',
+        },
+        {
+            'id': 'check_expiring',
+            'name': '即将过期检查',
+            'description': '记录 3 天内到期的账号，供后续提醒任务使用。',
+        },
+        {
+            'id': 'expiry_reminders',
+            'name': '到期提醒推送',
+            'description': '向到期前 N 天的用户发送提醒消息。',
+        },
+        {
+            'id': 'daily_stats',
+            'name': '每日统计汇总',
+            'description': '汇总注册用户 / 活跃用户 / 注册码 / Emby 状态写入日志。',
+        },
+        {
+            'id': 'cleanup_sessions',
+            'name': '不活跃会话清理',
+            'description': '巡检 Emby 当前会话数。',
+        },
+        {
+            'id': 'emby_sync',
+            'name': 'Emby 用户同步',
+            'description': '校对本地 EMBYID、用户名、启停状态与下载权限。',
+        },
+        {
+            'id': 'cleanup_no_emby',
+            'name': '无 Emby 账户用户清理',
+            'description': '清理注册超过配置天数仍未创建 Emby 账户的用户。开关：AUTO_CLEANUP_NO_EMBY',
+        },
+        {
+            'id': 'enforce_group_membership',
+            'name': 'Telegram 群组成员资格巡检',
+            'description': '检查已绑定 Telegram 的用户是否仍在必需群组内；不在则禁用本地账号 + Emby。开关：REQUIRE_GROUP_MEMBERSHIP',
+        },
+    ]
+
+    @classmethod
+    def _record_run_start(cls, job_id: str) -> int:
+        started = int(time.time())
+        cls._last_runs[job_id] = {
+            'status': 'running',
+            'started_at': started,
+            'finished_at': None,
+            'error': None,
+        }
+        cls._running.add(job_id)
+        return started
+
+    @classmethod
+    def _record_run_end(cls, job_id: str, started: int, error: Optional[str]) -> None:
+        cls._last_runs[job_id] = {
+            'status': 'failed' if error else 'success',
+            'started_at': started,
+            'finished_at': int(time.time()),
+            'error': (error or None) and str(error)[:500],
+        }
+        cls._running.discard(job_id)
+
+    @classmethod
+    async def _run_with_tracking(
+        cls,
+        job_id: str,
+        fn: Callable[[], Awaitable[None]],
+        *,
+        trigger: str = 'scheduled',
+    ) -> dict:
+        """执行 job 并记录 last-run 状态。供 APScheduler 调度与管理员手动触发共用。"""
+        if job_id in cls._running:
+            return cls._last_runs.get(job_id, {'status': 'running'})
+
+        started = cls._record_run_start(job_id)
+        logger.info(f"▶️ 任务 {job_id} 开始执行 ({trigger})")
+        error_text: Optional[str] = None
+        try:
+            await fn()
+        except Exception as exc:
+            error_text = str(exc) or exc.__class__.__name__
+            logger.exception(f"❌ 任务 {job_id} 执行异常: {exc}")
+        finally:
+            cls._record_run_end(job_id, started, error_text)
+
+        result = cls._last_runs[job_id]
+        if error_text:
+            logger.info(f"⏹️ 任务 {job_id} 失败结束 (耗时 {result['finished_at'] - started}s)")
+        else:
+            logger.info(f"✅ 任务 {job_id} 完成 (耗时 {result['finished_at'] - started}s)")
+        return result
+
+    @classmethod
+    def _make_scheduled(cls, job_id: str, fn: Callable[[], Awaitable[None]]):
+        """生成给 APScheduler 用的 async wrapper（带 last-run 追踪）。"""
+        async def runner():
+            await cls._run_with_tracking(job_id, fn, trigger='scheduled')
+        runner.__name__ = f"_run_{job_id}"
+        return runner
+
+    # ============== 手动触发入口（管理员 API 调用） ==============
+
+    @classmethod
+    def _resolve_job(cls, job_id: str) -> Optional[Callable[[], Awaitable[None]]]:
+        mapping: dict[str, Callable[[], Awaitable[None]]] = {
+            'check_expired': cls.check_expired_users,
+            'check_expiring': cls.check_expiring_users,
+            'expiry_reminders': cls.send_expiry_reminders,
+            'daily_stats': cls.daily_stats,
+            'cleanup_sessions': cls.cleanup_inactive_sessions,
+            'emby_sync': cls.emby_sync,
+            'cleanup_no_emby': cls.cleanup_no_emby_users,
+            'enforce_group_membership': cls.enforce_group_membership,
+        }
+        return mapping.get(job_id)
+
+    @classmethod
+    async def trigger_job(cls, job_id: str) -> tuple[bool, str, Optional[dict]]:
+        """手动触发指定 job。运行在调度器所在事件循环上（如果可用），
+        否则就在当前协程里 await（API 线程）。
+
+        Returns:
+            (ok, message, run_record) —— ok 仅表示触发成功，job 本身的结果在
+            run_record 中（status / error）。
+        """
+        fn = cls._resolve_job(job_id)
+        if fn is None:
+            return False, f"未知任务: {job_id}", None
+        if job_id in cls._running:
+            return False, f"任务 {job_id} 正在执行中，请稍候", cls._last_runs.get(job_id)
+
+        sched_loop = cls._scheduler_loop
+        try:
+            running_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            running_loop = None
+
+        coro_factory = lambda: cls._run_with_tracking(job_id, fn, trigger='manual')
+
+        if sched_loop is not None and sched_loop is not running_loop:
+            # API 线程触发 → 把任务安排到调度器所在 loop，立即返回，不阻塞 API
+            asyncio.run_coroutine_threadsafe(coro_factory(), sched_loop)
+            return True, "已触发，正在后台执行", cls._last_runs.get(job_id, {'status': 'running'})
+
+        # 没有独立 scheduler loop（或就在同一个 loop 上）：放进当前 loop
+        if running_loop is None:
+            await coro_factory()
+        else:
+            running_loop.create_task(coro_factory())
+        return True, "已触发", cls._last_runs.get(job_id, {'status': 'running'})
+
+    @classmethod
+    def list_jobs(cls) -> list[dict]:
+        """返回 job 列表 + 计划时间 + 上次运行情况，供管理员前端展示。"""
+        sched = cls._scheduler
+        scheduled_map: dict[str, object] = {}
+        if sched is not None and sched.running:
+            for j in sched.get_jobs():
+                scheduled_map[j.id] = j
+
+        items = []
+        for definition in cls.JOB_DEFINITIONS:
+            jid = definition['id']
+            scheduled = scheduled_map.get(jid)
+            next_run = None
+            schedule_str = None
+            if scheduled is not None:
+                if getattr(scheduled, 'next_run_time', None):
+                    next_run = int(scheduled.next_run_time.timestamp())
+                trigger = scheduled.trigger
+                schedule_str = str(trigger) if trigger else None
+            items.append({
+                **definition,
+                'enabled': scheduled is not None,
+                'schedule': schedule_str,
+                'next_run_at': next_run,
+                'last_run': cls._last_runs.get(jid),
+                'is_running': jid in cls._running,
+            })
+        return items
 
     @classmethod
     def get_scheduler(cls):
@@ -228,41 +424,45 @@ class SchedulerService:
             return
 
         scheduler = cls.get_scheduler()
-        
+        try:
+            cls._scheduler_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            cls._scheduler_loop = None
+
         # 解析配置时间
         def parse_time(time_str):
             try:
                 hour, minute = map(int, time_str.split(':'))
                 return hour, minute
-            except:
+            except Exception:
                 return 0, 0
 
-        # 注册定时任务
+        # 注册定时任务（所有 add_job 都包一层 last-run 追踪）
         h, m = parse_time(SchedulerConfig.EXPIRED_CHECK_TIME)
-        scheduler.add_job(cls.check_expired_users, 'cron', hour=h, minute=m, id='check_expired')
-        
+        scheduler.add_job(cls._make_scheduled('check_expired', cls.check_expired_users), 'cron', hour=h, minute=m, id='check_expired')
+
         h, m = parse_time(SchedulerConfig.EXPIRING_CHECK_TIME)
-        scheduler.add_job(cls.check_expiring_users, 'cron', hour=h, minute=m, id='check_expiring')
-        scheduler.add_job(cls.send_expiry_reminders, 'cron', hour=h, minute=(m+5)%60, id='expiry_reminders')
-        
+        scheduler.add_job(cls._make_scheduled('check_expiring', cls.check_expiring_users), 'cron', hour=h, minute=m, id='check_expiring')
+        scheduler.add_job(cls._make_scheduled('expiry_reminders', cls.send_expiry_reminders), 'cron', hour=h, minute=(m + 5) % 60, id='expiry_reminders')
+
         h, m = parse_time(SchedulerConfig.DAILY_STATS_TIME)
-        scheduler.add_job(cls.daily_stats, 'cron', hour=h, minute=m, id='daily_stats')
-        
-        scheduler.add_job(cls.cleanup_inactive_sessions, 'interval', hours=SchedulerConfig.SESSION_CLEANUP_INTERVAL, id='cleanup_sessions')
-        
+        scheduler.add_job(cls._make_scheduled('daily_stats', cls.daily_stats), 'cron', hour=h, minute=m, id='daily_stats')
+
+        scheduler.add_job(cls._make_scheduled('cleanup_sessions', cls.cleanup_inactive_sessions), 'interval', hours=SchedulerConfig.SESSION_CLEANUP_INTERVAL, id='cleanup_sessions')
+
         # Emby 数据同步（每 6 小时）
-        scheduler.add_job(cls.emby_sync, 'interval', hours=SchedulerConfig.EMBY_SYNC_INTERVAL, id='emby_sync')
+        scheduler.add_job(cls._make_scheduled('emby_sync', cls.emby_sync), 'interval', hours=SchedulerConfig.EMBY_SYNC_INTERVAL, id='emby_sync')
 
         # 无 Emby 账户用户清理（每天过期检查后执行）
         h_cleanup, m_cleanup = parse_time(SchedulerConfig.EXPIRED_CHECK_TIME)
-        scheduler.add_job(cls.cleanup_no_emby_users, 'cron', hour=h_cleanup, minute=(m_cleanup + 30) % 60, id='cleanup_no_emby')
+        scheduler.add_job(cls._make_scheduled('cleanup_no_emby', cls.cleanup_no_emby_users), 'cron', hour=h_cleanup, minute=(m_cleanup + 30) % 60, id='cleanup_no_emby')
 
         # 群组成员资格巡检（开关 + 群组配置齐备时才注册）
         from src.services.telegram_membership import TelegramMembershipService
         if TelegramMembershipService.enforcement_enabled():
             interval_minutes = max(1, int(TelegramConfig.GROUP_CHECK_INTERVAL_MINUTES or 30))
             scheduler.add_job(
-                cls.enforce_group_membership,
+                cls._make_scheduled('enforce_group_membership', cls.enforce_group_membership),
                 'interval',
                 minutes=interval_minutes,
                 id='enforce_group_membership',

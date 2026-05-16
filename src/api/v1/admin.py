@@ -1596,3 +1596,33 @@ async def admin_delete_announcement(announcement_id: int):
     logger.info(f"管理员 {g.current_user.USERNAME} 删除公告 ID={announcement_id}")
     return api_response(True, "公告已删除")
 
+
+# ==================== 定时任务管理 ====================
+
+@admin_bp.route('/scheduler/jobs', methods=['GET'])
+@require_auth
+@require_admin
+async def admin_list_scheduler_jobs():
+    """列出全部内置定时任务及其计划时间、上次运行情况。"""
+    from src.services.scheduler_service import SchedulerService
+    return api_response(True, "获取成功", {
+        'jobs': SchedulerService.list_jobs(),
+    })
+
+
+@admin_bp.route('/scheduler/jobs/<string:job_id>/run', methods=['POST'])
+@require_auth
+@require_admin
+async def admin_trigger_scheduler_job(job_id: str):
+    """立即手动触发一次指定定时任务。任务在后台执行，本接口立即返回。"""
+    from src.services.scheduler_service import SchedulerService
+
+    ok, message, record = await SchedulerService.trigger_job(job_id)
+    logger.info(
+        f"管理员 {g.current_user.USERNAME} 手动触发定时任务: {job_id} -> ok={ok} message={message}"
+    )
+    return api_response(ok, message, {
+        'job_id': job_id,
+        'last_run': record,
+    }, code=200 if ok else 400)
+
