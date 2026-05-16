@@ -3,6 +3,8 @@
 
 提供系统配置、状态等信息
 """
+from typing import Optional
+
 from flask import Blueprint, request, g
 from sqlalchemy import text
 
@@ -158,9 +160,25 @@ system_bp = Blueprint('system', __name__, url_prefix='/system')
 async def get_system_info():
     """
     获取系统公开信息
-    
+
     不需要登录即可访问
     """
+    # 暴露 Bot 用户名供前端展示/跳转
+    telegram_bot_username: Optional[str] = None
+    if Config.TELEGRAM_MODE:
+        try:
+            from src.bot.bot import get_bot_instance
+            bot_instance = get_bot_instance()
+            if bot_instance and bot_instance.application and bot_instance.application.bot:
+                # PTB 在 application.initialize() 后会缓存 username，可同步读取
+                telegram_bot_username = bot_instance.application.bot.username or None
+        except Exception:
+            telegram_bot_username = None
+
+    telegram_bot_url = (
+        f"https://t.me/{telegram_bot_username}" if telegram_bot_username else None
+    )
+
     return api_response(True, "获取成功", {
         'name': Config.SERVER_NAME or 'Twilight',
         'icon': Config.SERVER_ICON or '',
@@ -174,6 +192,10 @@ async def get_system_info():
         'limits': {
             'user_limit': RegisterConfig.USER_LIMIT,
             'stream_limit': DeviceLimitConfig.MAX_STREAMS if DeviceLimitConfig.DEVICE_LIMIT_ENABLED else None,
+        },
+        'telegram_bot': {
+            'username': telegram_bot_username,
+            'url': telegram_bot_url,
         },
     })
 
@@ -345,8 +367,6 @@ async def get_admin_config():
             'kick_oldest': DeviceLimitConfig.KICK_OLDEST_SESSION,
         },
         'security': {
-            'ip_limit': SecurityConfig.IP_LIMIT_ENABLED,
-            'max_ips': SecurityConfig.MAX_IPS_PER_USER,
             'login_fail_threshold': SecurityConfig.LOGIN_FAIL_THRESHOLD,
             'lockout_minutes': SecurityConfig.LOCKOUT_MINUTES,
         },
@@ -621,13 +641,13 @@ async def get_config_schema():
             {
                 'key': 'Security',
                 'title': '安全配置',
-                'description': '登录安全与 IP 限制',
+                'description': '登录失败锁定等安全策略',
                 'fields': [
-                    {'key': 'ip_limit_enabled', 'label': 'IP 限制', 'type': 'bool', 'description': '是否启用用户 IP 数量限制', 'value': SecurityConfig.IP_LIMIT_ENABLED},
-                    {'key': 'max_ips_per_user', 'label': '每用户最大 IP', 'type': 'int', 'description': '每个用户允许的最大 IP 地址数', 'value': SecurityConfig.MAX_IPS_PER_USER},
                     {'key': 'login_fail_threshold', 'label': '登录失败阈值', 'type': 'int', 'description': '连续登录失败多少次后锁定账号', 'value': SecurityConfig.LOGIN_FAIL_THRESHOLD},
                     {'key': 'lockout_minutes', 'label': '锁定时间', 'type': 'int', 'description': '账号锁定持续时间（分钟）', 'value': SecurityConfig.LOCKOUT_MINUTES},
-                    {'key': 'log_all_logins', 'label': '记录所有登录', 'type': 'bool', 'description': '是否记录所有登录行为', 'value': SecurityConfig.LOG_ALL_LOGINS},
+                    {'key': 'telegram_direct_login_enabled', 'label': 'Telegram 直登', 'type': 'bool', 'description': '是否允许仅凭 Telegram ID 直接换取登录会话（高风险）', 'value': SecurityConfig.TELEGRAM_DIRECT_LOGIN_ENABLED},
+                    {'key': 'apikey_direct_login_enabled', 'label': 'API Key 直登', 'type': 'bool', 'description': '是否允许通过 API Key 直接换取完整会话 Token', 'value': SecurityConfig.APIKEY_DIRECT_LOGIN_ENABLED},
+                    {'key': 'bot_internal_secret', 'label': 'Bot 内部密钥', 'type': 'secret', 'description': 'Bot 调用内部接口的密钥（建议显式配置）', 'value': SecurityConfig.BOT_INTERNAL_SECRET},
                 ],
             },
             {

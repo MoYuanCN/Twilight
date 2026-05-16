@@ -22,6 +22,7 @@ import {
   Lock,
   Globe,
   Star,
+  Bot,
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -42,7 +43,9 @@ import { useToast } from "@/hooks/use-toast";
 import { useAsyncResource } from "@/hooks/use-async-resource";
 import { PageError, PageLoading } from "@/components/layout/page-state";
 import { useAuthStore } from "@/store/auth";
+import { useSystemStore } from "@/store/system";
 import { api, type UserSettings, type TelegramStatus, type EmbyStatus } from "@/lib/api";
+import { passwordStrengthLabel, validatePasswordStrength } from "@/lib/password";
 
 const container = {
   hidden: { opacity: 0 },
@@ -57,6 +60,7 @@ const item = {
 export default function SettingsPage() {
   const { toast } = useToast();
   const { user, fetchUser } = useAuthStore();
+  const { info: systemInfo, fetchInfo: fetchSystemInfo } = useSystemStore();
   const [settings, setSettings] = useState<UserSettings | null>(null);
   const [telegramStatus, setTelegramStatus] = useState<TelegramStatus | null>(null);
   const [bgmTokenSet, setBgmTokenSet] = useState(false);
@@ -99,6 +103,15 @@ export default function SettingsPage() {
   const [showNewEmbyPwd, setShowNewEmbyPwd] = useState(false);
   const [showConfirmEmbyPwd, setShowConfirmEmbyPwd] = useState(false);
   const [isEmbyPwdLoading, setIsEmbyPwdLoading] = useState(false);
+
+  const systemPwdStrength = useMemo(
+    () => validatePasswordStrength(newPassword),
+    [newPassword]
+  );
+  const embyPwdStrength = useMemo(
+    () => validatePasswordStrength(newEmbyPassword),
+    [newEmbyPassword]
+  );
 
   // Emby URLs
   const [embyLines, setEmbyLines] = useState<Array<{ name: string; url: string }>>([]);
@@ -411,8 +424,9 @@ export default function SettingsPage() {
       toast({ title: "请填写当前密码和新密码", variant: "destructive" });
       return;
     }
-    if (newPassword.length < 6) {
-      toast({ title: "新密码长度至少 6 位", variant: "destructive" });
+    const strength = validatePasswordStrength(newPassword);
+    if (!strength.ok) {
+      toast({ title: "密码强度不足", description: strength.message, variant: "destructive" });
       return;
     }
     if (newPassword !== confirmPassword) {
@@ -444,8 +458,9 @@ export default function SettingsPage() {
       toast({ title: "请填写新的 Emby 密码", variant: "destructive" });
       return;
     }
-    if (newEmbyPassword.length < 6) {
-      toast({ title: "新密码长度至少 6 位", variant: "destructive" });
+    const strength = validatePasswordStrength(newEmbyPassword);
+    if (!strength.ok) {
+      toast({ title: "密码强度不足", description: strength.message, variant: "destructive" });
       return;
     }
     if (newEmbyPassword !== confirmEmbyPassword) {
@@ -488,6 +503,10 @@ export default function SettingsPage() {
       }
     });
   }, []);
+
+  useEffect(() => {
+    void fetchSystemInfo();
+  }, [fetchSystemInfo]);
 
   useEffect(() => {
     void runLineLatencyTests();
@@ -593,6 +612,33 @@ export default function SettingsPage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
+            {systemInfo?.telegram_bot?.username && (
+              <div className="flex items-center justify-between gap-3 rounded-lg border border-primary/20 bg-primary/5 px-4 py-3 text-sm">
+                <div className="flex items-center gap-2 min-w-0">
+                  <Bot className="h-4 w-4 text-primary shrink-0" />
+                  <div className="min-w-0">
+                    <p className="font-medium">本站 Bot</p>
+                    <a
+                      href={systemInfo.telegram_bot.url ?? `https://t.me/${systemInfo.telegram_bot.username}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="block truncate text-primary hover:underline"
+                    >
+                      @{systemInfo.telegram_bot.username}
+                    </a>
+                  </div>
+                </div>
+                <Button asChild size="sm" variant="outline">
+                  <a
+                    href={systemInfo.telegram_bot.url ?? `https://t.me/${systemInfo.telegram_bot.username}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    打开 Bot
+                  </a>
+                </Button>
+              </div>
+            )}
             <div className="flex items-center justify-between rounded-lg bg-accent/50 p-4">
               <div className="flex items-center gap-3">
                 <div className={`flex h-10 w-10 items-center justify-center rounded-full ${telegramStatus?.bound ? 'bg-emerald-500/20' : 'bg-muted'}`}>
@@ -673,7 +719,7 @@ export default function SettingsPage() {
             {bindCode && !telegramStatus?.bound && (
               <div className="rounded-lg bg-blue-500/10 p-4 space-y-2">
                 <p className="font-medium text-blue-500">绑定码已生成</p>
-                <div className="flex items-center gap-3">
+                <div className="flex flex-wrap items-center gap-2">
                   <code className="text-2xl font-mono font-bold tracking-widest bg-background/50 px-4 py-2 rounded-lg">
                     {bindCode}
                   </code>
@@ -687,9 +733,34 @@ export default function SettingsPage() {
                   >
                     复制命令
                   </Button>
+                  {systemInfo?.telegram_bot?.url && (
+                    <Button asChild variant="outline" size="sm">
+                      <a
+                        href={systemInfo.telegram_bot.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                      >
+                        <Bot className="mr-2 h-4 w-4" />
+                        打开 @{systemInfo.telegram_bot.username}
+                      </a>
+                    </Button>
+                  )}
                 </div>
                 <p className="text-sm text-muted-foreground">
-                  请在 {Math.floor(bindCodeExpiry / 60)} 分钟内向 Telegram Bot 发送：<code className="bg-background/50 px-1.5 py-0.5 rounded">/bind {bindCode}</code>
+                  请在 {Math.floor(bindCodeExpiry / 60)} 分钟内向{" "}
+                  {systemInfo?.telegram_bot?.username ? (
+                    <a
+                      href={systemInfo.telegram_bot.url ?? `https://t.me/${systemInfo.telegram_bot.username}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-primary hover:underline"
+                    >
+                      @{systemInfo.telegram_bot.username}
+                    </a>
+                  ) : (
+                    "Telegram Bot"
+                  )}{" "}
+                  发送：<code className="bg-background/50 px-1.5 py-0.5 rounded">/bind {bindCode}</code>
                 </p>
                 <p className="text-xs text-muted-foreground">
                   绑定完成后请刷新此页面确认。
@@ -1153,7 +1224,7 @@ export default function SettingsPage() {
               <div className="relative">
                 <Input
                   type={showNewPwd ? "text" : "password"}
-                  placeholder="至少 6 位"
+                  placeholder="至少 8 位，含大小写字母和数字"
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
                 />
@@ -1167,6 +1238,13 @@ export default function SettingsPage() {
                   {showNewPwd ? <EyeOff className="h-4 w-4 text-muted-foreground" /> : <Eye className="h-4 w-4 text-muted-foreground" />}
                 </Button>
               </div>
+              {newPassword && (
+                <p className={`text-xs ${systemPwdStrength.ok ? passwordStrengthLabel(systemPwdStrength.score).className : "text-destructive"}`}>
+                  {systemPwdStrength.ok
+                    ? `强度：${passwordStrengthLabel(systemPwdStrength.score).label}`
+                    : systemPwdStrength.message}
+                </p>
+              )}
             </div>
             <div className="space-y-2">
               <Label>确认新密码</Label>
@@ -1192,7 +1270,7 @@ export default function SettingsPage() {
             </Button>
             <Button
               onClick={handleChangeSystemPassword}
-              disabled={isSystemPwdLoading || !oldPassword || !newPassword || newPassword !== confirmPassword}
+              disabled={isSystemPwdLoading || !oldPassword || !systemPwdStrength.ok || newPassword !== confirmPassword}
             >
               {isSystemPwdLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               确认修改
@@ -1221,7 +1299,7 @@ export default function SettingsPage() {
               <div className="relative">
                 <Input
                   type={showNewEmbyPwd ? "text" : "password"}
-                  placeholder="至少 6 位"
+                  placeholder="至少 8 位，含大小写字母和数字"
                   value={newEmbyPassword}
                   onChange={(e) => setNewEmbyPassword(e.target.value)}
                 />
@@ -1235,6 +1313,13 @@ export default function SettingsPage() {
                   {showNewEmbyPwd ? <EyeOff className="h-4 w-4 text-muted-foreground" /> : <Eye className="h-4 w-4 text-muted-foreground" />}
                 </Button>
               </div>
+              {newEmbyPassword && (
+                <p className={`text-xs ${embyPwdStrength.ok ? passwordStrengthLabel(embyPwdStrength.score).className : "text-destructive"}`}>
+                  {embyPwdStrength.ok
+                    ? `强度：${passwordStrengthLabel(embyPwdStrength.score).label}`
+                    : embyPwdStrength.message}
+                </p>
+              )}
             </div>
             <div className="space-y-2">
               <Label>确认新密码</Label>
@@ -1271,7 +1356,7 @@ export default function SettingsPage() {
             </Button>
             <Button
               onClick={handleChangeEmbyPassword}
-              disabled={isEmbyPwdLoading || !newEmbyPassword || newEmbyPassword !== confirmEmbyPassword}
+              disabled={isEmbyPwdLoading || !embyPwdStrength.ok || newEmbyPassword !== confirmEmbyPassword}
             >
               {isEmbyPwdLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               确认修改

@@ -2,12 +2,17 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { api, type UserInfo } from "@/lib/api";
 
+export interface LoginResult {
+  ok: boolean;
+  message?: string;
+}
+
 interface AuthState {
   user: UserInfo | null;
   isAuthenticated: boolean;
   isLoading: boolean;
   initialize: () => Promise<void>;
-  login: (username: string, password: string) => Promise<boolean>;
+  login: (username: string, password: string) => Promise<LoginResult>;
   logout: () => Promise<void>;
   fetchUser: (options?: { silent?: boolean }) => Promise<void>;
   setUser: (user: UserInfo | null) => void;
@@ -55,11 +60,11 @@ export const useAuthStore = create<AuthState>()(
 
             set({ user: quickUser, isAuthenticated: true, isLoading: false });
             void get().fetchUser({ silent: true });
-            return true;
+            return { ok: true };
           }
-          return false;
-        } catch {
-          return false;
+          return { ok: false, message: res.message };
+        } catch (error: any) {
+          return { ok: false, message: error?.message };
         }
       },
 

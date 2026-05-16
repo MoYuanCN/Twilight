@@ -182,16 +182,10 @@ session_cookie_path = "/"
 # ===================================================================
 [Security]
 # ===================================================================
-# 是否启用同一用户 IP 数量限制
-ip_limit_enabled = false
-# 每用户 30 天内允许的最大 IP 数量
-max_ips_per_user = 10
 # 连续登录失败多少次后锁定
 login_fail_threshold = 5
 # 锁定时长（分钟）
 lockout_minutes = 30
-# 是否记录所有登录日志
-log_all_logins = true
 # 是否允许仅凭 telegram_id 直接登录（生产建议关闭）
 telegram_direct_login_enabled = false
 # 是否允许通过 API Key 直接换取完整会话 token（生产建议关闭）

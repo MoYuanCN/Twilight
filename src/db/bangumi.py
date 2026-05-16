@@ -4,7 +4,7 @@ Bangumi 番剧求片模块
 from enum import Enum
 from typing import Optional, List
 
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncAttrs, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -254,6 +254,30 @@ class BangumiRequireOperate:
                 results.extend(list(result.scalars().all()))
             results.sort(key=lambda r: (r.timestamp or 0, r.id or 0), reverse=True)
             return results
+
+    @staticmethod
+    async def count_active_requires_by_user(telegram_id: int) -> int:
+        """统计用户当前活跃（未处理/已接受/下载中）的求片数量。
+
+        使用聚合 COUNT 避免拉取全部记录后在 Python 端过滤导致的卡顿。
+        """
+        active_values = (
+            ReqStatus.UNHANDLED.value,
+            ReqStatus.ACCEPTED.value,
+            ReqStatus.DOWNLOADING.value,
+        )
+        total = 0
+        async with BangumiSessionFactory() as session:
+            for model in [BangumiRequireModel, TMDBRequireModel]:
+                stmt = (
+                    select(func.count())
+                    .select_from(model)
+                    .where(model.telegram_id == telegram_id)
+                    .where(model.status.in_(active_values))
+                )
+                result = await session.execute(stmt)
+                total += int(result.scalar() or 0)
+        return total
 
     @staticmethod
     async def get_all_requires_by_status(status: ReqStatus) -> List[BangumiDatabaseModel]:

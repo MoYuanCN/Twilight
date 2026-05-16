@@ -325,11 +325,8 @@ class APIConfig(BaseConfig):
 
 class SecurityConfig(BaseConfig):
     """安全配置"""
-    IP_LIMIT_ENABLED: bool = False  # 是否启用 IP 限制
-    MAX_IPS_PER_USER: int = 10  # 每用户最大 IP 数
     LOGIN_FAIL_THRESHOLD: int = 5  # 登录失败锁定阈值
     LOCKOUT_MINUTES: int = 30  # 锁定时间
-    LOG_ALL_LOGINS: bool = True  # 是否记录所有登录
     TELEGRAM_DIRECT_LOGIN_ENABLED: bool = False  # 是否允许仅凭 telegram_id 直接登录
     APIKEY_DIRECT_LOGIN_ENABLED: bool = False  # 是否允许通过 API Key 直接换取完整会话 token
     BOT_INTERNAL_SECRET: str = ''  # Bot 调用内部接口的密钥（建议显式配置）

@@ -43,8 +43,8 @@ export default function LoginPage() {
 
     setIsLoading(true);
     try {
-      const success = await login(username, password);
-      if (success) {
+      const result = await login(username, password);
+      if (result.ok) {
         toast({
           title: "登录成功",
           description: "欢迎回来！",
@@ -52,9 +52,11 @@ export default function LoginPage() {
         });
         router.replace("/dashboard");
       } else {
+        const message = result.message || "用户名或密码错误";
+        const disabled = /禁用/.test(message);
         toast({
-          title: "登录失败",
-          description: "用户名或密码错误",
+          title: disabled ? "账户已被禁用" : "登录失败",
+          description: disabled ? "请联系管理员处理" : message,
           variant: "destructive",
         });
       }

@@ -548,33 +548,6 @@ class ApiClient {
     return this.request<{ apis: Array<{ method: string; path: string; endpoint: string; full_path: string }>; total: number }>("/system/admin/apis");
   }
 
-  async getEmbyLibraries() {
-    return this.request<Array<{ id: string; name: string; type: string }>>("/system/admin/emby/libraries");
-  }
-
-  async getUserLibraries(uid: number) {
-    return this.request<{
-      all_libraries: Array<{ id: string; name: string; type: string }>;
-      enabled_ids: string[];
-      enable_all: boolean;
-      has_emby: boolean;
-    }>(`/admin/users/${uid}/libraries`);
-  }
-
-  async setUserLibrariesByIds(uid: number, libraryIds: string[], enableAll: boolean = false) {
-    return this.request(`/admin/users/${uid}/libraries`, {
-      method: "PUT",
-      body: JSON.stringify({ library_ids: libraryIds, enable_all: enableAll }),
-    });
-  }
-
-  async setUserLibraries(uid: number, libraryNames: string[], enableAll: boolean = false) {
-    return this.request(`/admin/users/${uid}/libraries`, {
-      method: "PUT",
-      body: JSON.stringify({ library_names: libraryNames, enable_all: enableAll }),
-    });
-  }
-
   async syncAllEmbyUsers() {
     return this.request<{ success: number; failed: number; errors: string[] }>("/admin/emby/sync", {
       method: "POST",
@@ -953,6 +926,10 @@ export interface SystemInfo {
   version: string;
   features: Record<string, boolean>;
   limits: Record<string, number | null>;
+  telegram_bot?: {
+    username: string | null;
+    url: string | null;
+  };
 }
 
 export interface SystemHealth {

@@ -341,11 +341,9 @@ async def change_my_password():
     if not old_password or not new_password:
         return api_response(False, "请提供当前密码和新密码", code=400)
 
-    if len(new_password) < 6:
-        return api_response(False, "新密码长度至少 6 位", code=400)
-
-    if len(new_password) > 200:
-        return api_response(False, "密码过长", code=400)
+    ok, msg = UserService.validate_password_strength(new_password, label="新密码")
+    if not ok:
+        return api_response(False, msg, code=400)
 
     success, message = await UserService.change_password(g.current_user, old_password, new_password)
 
@@ -373,11 +371,9 @@ async def change_my_system_password():
     if not old_password or not new_password:
         return api_response(False, "请提供当前密码和新密码", code=400)
 
-    if len(new_password) < 6:
-        return api_response(False, "新密码长度至少 6 位", code=400)
-
-    if len(new_password) > 200:
-        return api_response(False, "密码过长", code=400)
+    ok, msg = UserService.validate_password_strength(new_password, label="新密码")
+    if not ok:
+        return api_response(False, msg, code=400)
 
     success, message = await UserService.change_system_password(g.current_user, old_password, new_password)
     if success:
@@ -402,11 +398,9 @@ async def change_my_emby_password():
     if not new_password:
         return api_response(False, "请提供新密码", code=400)
 
-    if len(new_password) < 6:
-        return api_response(False, "新密码长度至少 6 位", code=400)
-
-    if len(new_password) > 200:
-        return api_response(False, "密码过长", code=400)
+    ok, msg = UserService.validate_password_strength(new_password, label="新密码")
+    if not ok:
+        return api_response(False, msg, code=400)
 
     success, message = await UserService.change_emby_password(g.current_user, new_password)
     if success:

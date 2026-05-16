@@ -15,6 +15,7 @@ import { api, type EmbyRegisterStatus, type RegisterAvailability, type RegisterD
 import { SITE_NAME } from "@/lib/site-config";
 import { useAuthStore } from "@/store/auth";
 import { useSystemStore } from "@/store/system";
+import { passwordStrengthLabel, validatePasswordStrength } from "@/lib/password";
 
 type RegisterTarget = "system" | "emby";
 
@@ -188,8 +189,9 @@ export default function RegisterPage() {
         return false;
       }
 
-      if (formData.password.length < 6) {
-        toast({ title: "密码太短", description: "密码至少需要 6 位", variant: "destructive" });
+      const strength = validatePasswordStrength(formData.password, "密码");
+      if (!strength.ok) {
+        toast({ title: "密码强度不足", description: strength.message, variant: "destructive" });
         return false;
       }
     }
@@ -302,8 +304,8 @@ export default function RegisterPage() {
 
     setLoginLoading(true);
     try {
-      const success = await login(loginUsername, loginPassword);
-      if (success) {
+      const result = await login(loginUsername, loginPassword);
+      if (result.ok) {
         toast({
           title: "登录成功",
           description: "欢迎回来！",
@@ -311,9 +313,11 @@ export default function RegisterPage() {
         });
         router.replace("/dashboard");
       } else {
+        const message = result.message || "用户名或密码错误";
+        const disabled = /禁用/.test(message);
         toast({
-          title: "登录失败",
-          description: "用户名或密码错误",
+          title: disabled ? "账户已被禁用" : "登录失败",
+          description: disabled ? "请联系管理员处理" : message,
           variant: "destructive",
         });
       }
@@ -377,6 +381,20 @@ export default function RegisterPage() {
                   点击“获取绑定码”，在 Bot 私聊中发送 /bind &lt;绑定码&gt; 完成验证。
                   Emby 账号注册始终要求先完成这一步。
                 </p>
+                {systemInfo?.telegram_bot?.username ? (
+                  <p className="mt-2 inline-flex items-center gap-1.5 text-xs">
+                    <Bot className="h-3.5 w-3.5" />
+                    <span>绑定 Bot：</span>
+                    <a
+                      href={systemInfo.telegram_bot.url ?? `https://t.me/${systemInfo.telegram_bot.username}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-medium text-primary hover:underline"
+                    >
+                      @{systemInfo.telegram_bot.username}
+                    </a>
+                  </p>
+                ) : null}
                 {registerAvailability ? (
                   <p className="mt-2 text-xs text-muted-foreground">
                     当前注册配额: {registerAvailability.current_users} / {registerAvailability.max_users}
@@ -447,7 +465,7 @@ export default function RegisterPage() {
                           id="password"
                           name="password"
                           type={showPassword ? "text" : "password"}
-                          placeholder={registerTarget === "system" ? "Password (Min 6 chars)" : "留空则自动生成密码"}
+                          placeholder={registerTarget === "system" ? "至少 8 位，含大小写字母和数字" : "留空则自动生成密码"}
                           value={formData.password}
                           onChange={handleChange}
                           className="h-11 pr-10"
@@ -460,6 +478,14 @@ export default function RegisterPage() {
                           {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                         </button>
                       </div>
+                      {formData.password && (() => {
+                        const s = validatePasswordStrength(formData.password, "密码");
+                        return (
+                          <p className={`text-xs ${s.ok ? passwordStrengthLabel(s.score).className : "text-destructive"}`}>
+                            {s.ok ? `强度：${passwordStrengthLabel(s.score).label}` : s.message}
+                          </p>
+                        );
+                      })()}
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="confirmPassword" className="ml-1">
@@ -498,11 +524,29 @@ export default function RegisterPage() {
                       <p className="mt-1 leading-relaxed">
                         点击“获取绑定码”后，在 Bot 私聊中发送 /bind &lt;绑定码&gt; 完成验证。
                       </p>
+                      {systemInfo?.telegram_bot?.username ? (
+                        <p className="mt-2 inline-flex items-center gap-1.5 text-xs text-amber-900">
+                          <Bot className="h-3.5 w-3.5" />
+                          <span>本站 Bot：</span>
+                          <a
+                            href={systemInfo.telegram_bot.url ?? `https://t.me/${systemInfo.telegram_bot.username}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="font-medium underline-offset-2 hover:underline"
+                          >
+                            @{systemInfo.telegram_bot.username}
+                          </a>
+                        </p>
+                      ) : (
+                        <p className="mt-2 text-xs text-amber-700">
+                          管理员尚未配置可识别的 Bot 账号，如无法获取绑定码请联系管理员。
+                        </p>
+                      )}
                       <p className="mt-2 text-xs text-amber-700">
                         Emby 账号注册默认强制验证 Telegram 绑定，防止冒用注册。
                       </p>
                     </div>
-                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:flex-wrap">
                       <Button
                         type="button"
                         onClick={handleGetTelegramBindCode}
@@ -515,10 +559,26 @@ export default function RegisterPage() {
                         )}
                         获取绑定码
                       </Button>
+                      {systemInfo?.telegram_bot?.url ? (
+                        <Button
+                          asChild
+                          type="button"
+                          variant="outline"
+                        >
+                          <a
+                            href={systemInfo.telegram_bot.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
+                            <Bot className="mr-2 h-4 w-4" />
+                            打开 @{systemInfo.telegram_bot.username}
+                          </a>
+                        </Button>
+                      ) : null}
                       {bindCode ? (
                         <div className="rounded-lg border border-border/70 bg-muted/50 px-3 py-2 text-sm text-muted-foreground">
-                          <p>绑定码：</p>
-                          <p className="font-mono text-base text-foreground">{bindCode}</p>
+                          <p>请到 Bot 私聊发送：</p>
+                          <p className="font-mono text-base text-foreground">/bind {bindCode}</p>
                           <p>有效期：{Math.floor(bindCodeExpiry / 60)} 分钟</p>
                         </div>
                       ) : null}

@@ -66,19 +66,26 @@ class UserService:
         return "永久" if days <= 0 else f"{days} 天"
 
     @staticmethod
-    def _validate_emby_register_password(password: Optional[str]) -> Tuple[bool, str]:
-        """校验 Emby 注册密码强度。"""
-        if password is None:
-            return False, "请提供 Emby 密码"
+    def validate_password_strength(password: Optional[str], label: str = "密码") -> Tuple[bool, str]:
+        """统一的密码强度校验：≥ 8 位，且包含大小写字母与数字。"""
+        if password is None or password == "":
+            return False, f"请提供{label}"
         if len(password) < 8:
-            return False, "Emby 密码强度不足：至少 8 位，且包含大小写字母和数字"
+            return False, f"{label}强度不足：至少 8 位，且包含大小写字母和数字"
+        if len(password) > 128:
+            return False, f"{label}过长，最多 128 位"
         if not any(ch.islower() for ch in password):
-            return False, "Emby 密码强度不足：至少包含一个小写字母"
+            return False, f"{label}强度不足：至少包含一个小写字母"
         if not any(ch.isupper() for ch in password):
-            return False, "Emby 密码强度不足：至少包含一个大写字母"
+            return False, f"{label}强度不足：至少包含一个大写字母"
         if not any(ch.isdigit() for ch in password):
-            return False, "Emby 密码强度不足：至少包含一个数字"
+            return False, f"{label}强度不足：至少包含一个数字"
         return True, ""
+
+    @staticmethod
+    def _validate_emby_register_password(password: Optional[str]) -> Tuple[bool, str]:
+        """校验 Emby 注册密码强度（保留旧入口，复用统一规则）。"""
+        return UserService.validate_password_strength(password, label="Emby 密码")
 
     @staticmethod
     async def get_registered_user_count(use_cache: bool = True) -> int:
@@ -898,8 +905,9 @@ class UserService:
         if not user.PASSWORD or not _verify(old_password, user.PASSWORD):
             return False, "当前密码错误"
 
-        if len(new_password) < 6:
-            return False, "新密码长度至少 6 位"
+        ok, msg = UserService.validate_password_strength(new_password, label="新密码")
+        if not ok:
+            return False, msg
 
         try:
             # 更新系统密码
@@ -933,8 +941,9 @@ class UserService:
         if not user.PASSWORD or not _verify(old_password, user.PASSWORD):
             return False, "当前密码错误"
 
-        if len(new_password) < 6:
-            return False, "新密码长度至少 6 位"
+        ok, msg = UserService.validate_password_strength(new_password, label="新密码")
+        if not ok:
+            return False, msg
 
         try:
             user.PASSWORD = hash_password(new_password)
@@ -955,8 +964,9 @@ class UserService:
         if not user.EMBYID:
             return False, "用户没有关联的 Emby 账户"
 
-        if len(new_password) < 6:
-            return False, "新密码长度至少 6 位"
+        ok, msg = UserService.validate_password_strength(new_password, label="新密码")
+        if not ok:
+            return False, msg
 
         try:
             emby = get_emby_client()

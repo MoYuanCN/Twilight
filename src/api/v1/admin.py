@@ -205,22 +205,37 @@ async def update_user(uid: int):
             if role not in [r.value for r in Role]:
                 return api_response(False, "无效的角色值", code=400)
             target_user.ROLE = role
-        
+
         # 更新 Emby ID
         if 'emby_id' in data:
             target_user.EMBYID = data['emby_id'] or None
-        
+
         # 更新启用状态
+        active_changed = False
+        new_active: bool = target_user.ACTIVE_STATUS
         if 'active' in data:
-            target_user.ACTIVE_STATUS = bool(data['active'])
-        
+            new_active = bool(data['active'])
+            active_changed = new_active != target_user.ACTIVE_STATUS
+            target_user.ACTIVE_STATUS = new_active
+
         # 保存到数据库
         await UserOperate.update_user(target_user)
-        
-        return api_response(True, "更新成功")
+
+        # 启用/禁用变更时同步 Emby 账户
+        emby_sync_msg = ""
+        if active_changed and target_user.EMBYID:
+            try:
+                emby = get_emby_client()
+                await emby.set_user_enabled(target_user.EMBYID, new_active)
+            except Exception as emby_err:
+                logger.error(
+                    f"同步 Emby 启用状态失败 (uid={target_user.UID}): {emby_err}",
+                    exc_info=True,
+                )
+                emby_sync_msg = "，但同步 Emby 账户状态失败"
+
+        return api_response(True, "更新成功" + emby_sync_msg)
     except Exception as e:
-        import logging
-        logger = logging.getLogger(__name__)
         logger.error(f"更新用户信息失败: {e}", exc_info=True)
         return api_response(False, f"更新失败: {e}", code=500)
 

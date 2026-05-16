@@ -741,23 +741,19 @@ class MediaRequestService:
 
         # 检查当前用户的并发求片数量
         from src.config import RegisterConfig
-        current_requests = await BangumiRequireOperate.get_all_requires_by_user(telegram_id)
-        active_count = sum(
-            1
-            for req in current_requests
-            if req.status in {
-                ReqStatus.UNHANDLED.value,
-                ReqStatus.ACCEPTED.value,
-                ReqStatus.DOWNLOADING.value,
-            }
-        )
         max_concurrent = RegisterConfig.MAX_CONCURRENT_REQUESTS_PER_USER
-        if max_concurrent > 0 and active_count >= max_concurrent:
-            return (
-                False,
-                f"您当前已有 {active_count} 个待处理或下载中的求片请求，超过系统允许的最大同时请求数 {max_concurrent}，请等待已有请求处理完成后再提交。",
-                None,
-            )
+        if max_concurrent > 0:
+            try:
+                active_count = await BangumiRequireOperate.count_active_requires_by_user(telegram_id)
+            except Exception as count_err:
+                logger.error(f"统计求片数量失败 (telegram_id={telegram_id}): {count_err}", exc_info=True)
+                return False, "求片数量统计失败，请稍后重试", None
+            if active_count >= max_concurrent:
+                return (
+                    False,
+                    f"您当前已有 {active_count} 个待处理或下载中的求片请求，超过系统允许的最大同时请求数 {max_concurrent}，请等待已有请求处理完成后再提交。",
+                    None,
+                )
         
         # 库存检查（除非明确跳过）
         if not skip_inventory_check:
