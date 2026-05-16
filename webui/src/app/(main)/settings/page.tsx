@@ -784,34 +784,34 @@ export default function SettingsPage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="flex items-center justify-between rounded-lg bg-accent/50 p-4">
-              <div className="flex items-center gap-3">
-                <div className={`flex h-10 w-10 items-center justify-center rounded-full ${user?.emby_id ? 'bg-emerald-500/20' : 'bg-muted'}`}>
+            <div className="flex flex-col gap-3 rounded-lg bg-accent/50 p-4 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className={`flex h-10 w-10 items-center justify-center rounded-full shrink-0 ${user?.emby_id ? 'bg-emerald-500/20' : 'bg-muted'}`}>
                   {user?.emby_id ? (
                     <Check className="h-5 w-5 text-emerald-500" />
                   ) : (
                     <X className="h-5 w-5 text-muted-foreground" />
                   )}
                 </div>
-                <div>
+                <div className="min-w-0 flex-1">
                   <p className="font-medium">
                     {user?.emby_id ? "已绑定" : "未绑定"}
                   </p>
                   {user?.emby_id && (
-                    <p className="text-sm text-muted-foreground">
+                    <p className="text-sm text-muted-foreground break-all">
                       Emby ID: {user.emby_id}
                     </p>
                   )}
                   {user?.emby_id && (user.emby_username || user.username) && (
-                    <p className="text-sm text-muted-foreground">
+                    <p className="text-sm text-muted-foreground break-all">
                       Emby 用户名: {user.emby_username || user.username}
                     </p>
                   )}
                 </div>
               </div>
-              <div className="flex gap-2">
+              <div className="flex gap-2 shrink-0 sm:justify-end">
                 {!user?.emby_id ? (
-                  <Button onClick={() => setBindEmbyOpen(true)}>
+                  <Button onClick={() => setBindEmbyOpen(true)} className="w-full sm:w-auto">
                     <LinkIcon className="mr-2 h-4 w-4" />
                     绑定
                   </Button>
@@ -820,6 +820,7 @@ export default function SettingsPage() {
                     variant="destructive"
                     onClick={handleUnbindEmby}
                     disabled={isEmbyLoading}
+                    className="w-full sm:w-auto"
                   >
                     {isEmbyLoading ? (
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
