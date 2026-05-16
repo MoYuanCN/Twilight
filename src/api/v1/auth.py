@@ -423,21 +423,21 @@ async def login():
         'active': user.ACTIVE_STATUS,
     }
     
-    # 异步后台任务：同步 Emby 状态和获取完整用户信息（不阻塞登录）
+    # 异步后台任务：同步 Emby 状态（不阻塞登录）。
+    # 注意：不能 `loop.create_task(...)`，因为生产环境是 WsgiToAsgi，
+    # 请求结束后 per-request executor 立即销毁，孤儿任务会触发
+    # "CurrentThreadExecutor already quit or is broken"。
     async def sync_background_tasks():
         try:
-            # 同步用户到 Emby
             await UserService.sync_user_to_emby(user)
         except Exception as e:
             logger.warning(f"后台同步用户状态到 Emby 失败: {e}")
-    
-    # 在后台运行，不等待
+
     try:
-        import asyncio
-        loop = asyncio.get_running_loop()
-        loop.create_task(sync_background_tasks())
-    except:
-        pass
+        from src.core.background import submit_background
+        submit_background(sync_background_tasks())
+    except Exception as exc:  # pragma: no cover - 投递失败不影响登录
+        logger.warning(f"后台任务投递失败: {exc}")
     
     response, code = api_response(True, "登录成功", {
         'user': basic_user_info,
@@ -494,18 +494,21 @@ async def login_telegram():
     user.LAST_LOGIN_UA = request.headers.get('User-Agent', 'unknown')
     await UserOperate.update_user(user)
     
-    # 异步后台同步用户状态到 Emby（不阻塞登录）
-    import asyncio
+    # 异步后台同步用户状态到 Emby（不阻塞登录）。同上：必须用独立后台 loop。
     from src.services import UserService
+    from src.core.background import submit_background
+
     async def sync_emby_async():
         try:
             await UserService.sync_user_to_emby(user)
         except Exception as e:
             import logging
-            logger = logging.getLogger(__name__)
-            logger.warning(f"同步用户状态到 Emby 失败: {e}")
-    
-    asyncio.create_task(sync_emby_async())
+            logging.getLogger(__name__).warning(f"同步用户状态到 Emby 失败: {e}")
+
+    try:
+        submit_background(sync_emby_async())
+    except Exception as exc:  # pragma: no cover
+        logger.warning(f"后台任务投递失败: {exc}")
     
     # 生成 token
     token = await generate_token(user.UID)

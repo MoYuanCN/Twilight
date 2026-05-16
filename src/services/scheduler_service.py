@@ -170,11 +170,10 @@ class SchedulerService:
             asyncio.run_coroutine_threadsafe(coro_factory(), sched_loop)
             return True, "已触发，正在后台执行", cls._last_runs.get(job_id, {'status': 'running'})
 
-        # 没有独立 scheduler loop（或就在同一个 loop 上）：放进当前 loop
-        if running_loop is None:
-            await coro_factory()
-        else:
-            running_loop.create_task(coro_factory())
+        # 没有独立 scheduler loop：交给共享后台 loop，避免 asgiref/WsgiToAsgi
+        # 在请求结束后销毁 per-request executor 导致孤儿任务崩溃。
+        from src.core.background import submit_background
+        submit_background(coro_factory())
         return True, "已触发", cls._last_runs.get(job_id, {'status': 'running'})
 
     @classmethod
