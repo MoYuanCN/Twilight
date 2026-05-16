@@ -24,35 +24,42 @@ admin_bp = Blueprint('admin', __name__, url_prefix='/admin')
 async def list_users():
     """
     获取用户列表
-    
+
     Query:
         page: int - 页码（从1开始，默认1）
         per_page: int - 每页数量（默认20，最大100）
         role: int - 按角色筛选 (0=管理员, 1=普通用户, 2=白名单)
-        active: bool - 按状态筛选 (true/false)
-        search: str - 搜索用户名
+        active: bool - 按状态筛选 (true=仅启用 / false=仅禁用，省略=不过滤)
+        search: str - 搜索 UID / 用户名 / Telegram ID
+        sort: str - 排序字段+方向，形如 ``uid_desc`` / ``username_asc`` /
+                    ``register_time_desc`` / ``expired_at_asc`` / ``role_asc``
+                    / ``active_desc`` / ``last_login_time_desc``
     """
-    page = request.args.get('page', 1, type=int)
-    per_page = min(request.args.get('per_page', 20, type=int), 100)
+    page = max(1, request.args.get('page', 1, type=int))
+    per_page = min(max(1, request.args.get('per_page', 20, type=int)), 100)
     role = request.args.get('role', type=int)
     active = request.args.get('active')
     search = request.args.get('search', '').strip()
-    
-    # 转换 active 参数
-    include_inactive = True
+    sort_by = (request.args.get('sort') or '').strip() or None
+
+    # 显式三态：true=只看启用，false=只看禁用，省略=全部
+    active_status: bool | None = None
     if active is not None:
-        include_inactive = active.lower() != 'true'  # 如果 active=true，则只包含激活用户
-    
-    # 计算偏移量
+        if active.lower() == 'true':
+            active_status = True
+        elif active.lower() == 'false':
+            active_status = False
+
     offset = (page - 1) * per_page
-    
-    # 获取用户列表（包含总数）
+
     users, total = await UserOperate.get_all_users(
         offset=offset,
         limit=per_page,
         role=role,
-        include_inactive=include_inactive,
+        active_status=active_status,
+        include_inactive=True,  # 让 active_status 完全主导筛选
         search=search or None,
+        sort_by=sort_by,
     )
     
     # 转换为字典

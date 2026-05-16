@@ -664,37 +664,101 @@ class UserOperate:
         role: Optional[int] = None,
         search: Optional[str] = None,
         limit: int = 100,
-        offset: int = 0
+        offset: int = 0,
+        active_status: Optional[bool] = None,
+        sort_by: Optional[str] = None,
     ) -> tuple[list[UserModel], int]:
-        """
-        分页获取用户列表
-        
-        :return: (用户列表, 总数)
+        """分页 + 筛选 + 排序获取用户列表。
+
+        :param include_inactive: 兼容字段。``active_status`` 未传时回退使用它：
+                                 False（默认）→ 仅活跃，True → 不限制。
+        :param role: 角色过滤，传 ``Role.value``。
+        :param search: 模糊匹配 ``UID`` / ``USERNAME`` / ``TELEGRAM_ID``。
+        :param active_status: 显式启停过滤。None=不过滤；True=仅启用；False=仅禁用。
+        :param sort_by: 排序字段，形如 ``uid_desc`` / ``username_asc`` / ``register_time_desc`` 等。
+        :return: ``(users, total)``。
         """
         async with UsersSessionFactory() as session:
-            # 构建查询条件
             conditions = []
-            if not include_inactive:
+
+            if active_status is True:
                 conditions.append(UserModel.ACTIVE_STATUS == True)
+            elif active_status is False:
+                conditions.append(UserModel.ACTIVE_STATUS == False)
+            elif not include_inactive:
+                # 旧路径：未显式指定时，默认仅返回活跃用户。
+                conditions.append(UserModel.ACTIVE_STATUS == True)
+
             if role is not None:
                 conditions.append(UserModel.ROLE == role)
             if search:
-                conditions.append(UserModel.USERNAME.ilike(f"%{search}%"))
-            
-            # 查询总数
+                like = f"%{search}%"
+                or_clauses = [UserModel.USERNAME.ilike(like)]
+                if search.isdigit():
+                    try:
+                        as_int = int(search)
+                        or_clauses.append(UserModel.UID == as_int)
+                        or_clauses.append(UserModel.TELEGRAM_ID == as_int)
+                    except ValueError:
+                        pass
+                from sqlalchemy import or_ as _or
+                conditions.append(_or(*or_clauses))
+
             count_query = select(func.count()).select_from(UserModel)
             if conditions:
                 count_query = count_query.where(*conditions)
             total_result = await session.execute(count_query)
             total = total_result.scalar_one()
-            
-            # 查询用户
-            query = select(UserModel).order_by(UserModel.UID.desc()).limit(limit).offset(offset)
+
+            # 排序：字段名映射
+            sort_map = {
+                'uid': UserModel.UID,
+                'username': UserModel.USERNAME,
+                'role': UserModel.ROLE,
+                'active': UserModel.ACTIVE_STATUS,
+                'expired_at': UserModel.EXPIRED_AT,
+                'register_time': UserModel.REGISTER_TIME,
+                'last_login_time': UserModel.LAST_LOGIN_TIME,
+            }
+            order_field = UserModel.UID
+            order_desc = True
+            if isinstance(sort_by, str) and sort_by:
+                base = sort_by.strip()
+                direction = 'desc'
+                for suffix in ('_desc', '_asc'):
+                    if base.endswith(suffix):
+                        direction = suffix.strip('_')
+                        base = base[: -len(suffix)]
+                        break
+                order_field = sort_map.get(base, UserModel.UID)
+                order_desc = direction != 'asc'
+
+            order_clause = order_field.desc() if order_desc else order_field.asc()
+            tiebreak = UserModel.UID.desc() if order_field is not UserModel.UID else None
+
+            query = select(UserModel).order_by(*(c for c in (order_clause, tiebreak) if c is not None))
             if conditions:
                 query = query.where(*conditions)
+            query = query.limit(limit).offset(offset)
             result = await session.execute(query)
-            
             return list(result.scalars().all()), total
+
+    @staticmethod
+    async def get_active_telegram_bound_users() -> list[UserModel]:
+        """获取所有「ACTIVE_STATUS=True 且绑定了 Telegram」的非管理员/非白名单用户。
+
+        供定时群组成员资格检查使用。
+        """
+        async with UsersSessionFactory() as session:
+            result = await session.execute(
+                select(UserModel).where(
+                    UserModel.ACTIVE_STATUS == True,
+                    UserModel.TELEGRAM_ID.isnot(None),
+                    UserModel.ROLE != Role.ADMIN.value,
+                    UserModel.ROLE != Role.WHITE_LIST.value,
+                )
+            )
+            return list(result.scalars().all())
 
     @staticmethod
     async def batch_disable_users(uids: list[int]) -> int:

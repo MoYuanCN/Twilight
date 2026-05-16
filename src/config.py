@@ -262,6 +262,8 @@ class TelegramConfig(BaseConfig):
     FORCE_SUBSCRIBE: bool = False
     PROXY_URL: str = ''  # HTTP 代理地址，如 http://127.0.0.1:7890 或 socks5://127.0.0.1:1080
     ENABLE_TG_PANEL: bool = False  # 是否开启 TG Bot 完整面板（关闭时仅允许绑定和查看基础信息）
+    REQUIRE_GROUP_MEMBERSHIP: bool = False  # 是否强制要求绑定/已绑定用户保持在配置中的群组内
+    GROUP_CHECK_INTERVAL_MINUTES: int = 30  # 定时检查间隔（分钟），开启上面开关后生效
 
 
 class RegisterConfig(BaseConfig):

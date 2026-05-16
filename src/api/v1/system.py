@@ -588,6 +588,8 @@ async def get_config_schema():
                     {'key': 'channel_id', 'label': '频道 ID', 'type': 'list', 'description': 'Telegram 频道 ID 列表，支持数字ID（如 -1001234567890）或 @用户名（如 @mychannel）', 'value': TelegramConfig.CHANNEL_ID},
                     {'key': 'force_subscribe', 'label': '强制订阅', 'type': 'bool', 'description': '是否要求用户订阅频道后才能使用', 'value': TelegramConfig.FORCE_SUBSCRIBE},
                     {'key': 'enable_tg_panel', 'label': '启用 TG 面板', 'type': 'bool', 'description': '启用后 Bot 提供完整的内联键盘面板功能，关闭则仅保留 /help、/bind、/me 基础命令', 'value': TelegramConfig.ENABLE_TG_PANEL},
+                    {'key': 'require_group_membership', 'label': '强制群组成员资格', 'type': 'bool', 'description': '开启后绑定时校验，且定时巡检；用户退出必需群组将被禁用并同步禁用 Emby', 'value': TelegramConfig.REQUIRE_GROUP_MEMBERSHIP},
+                    {'key': 'group_check_interval_minutes', 'label': '群组检查间隔（分钟）', 'type': 'int', 'description': '群组成员资格定时巡检间隔（分钟），开启上述开关后生效', 'value': TelegramConfig.GROUP_CHECK_INTERVAL_MINUTES},
                     {'key': 'proxy_url', 'label': '代理地址', 'type': 'string', 'description': 'Telegram Bot 代理地址（如 socks5://127.0.0.1:1080），留空不使用代理', 'value': TelegramConfig.PROXY_URL},
                 ],
             },

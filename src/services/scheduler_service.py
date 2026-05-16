@@ -1,6 +1,6 @@
 import logging
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from src.config import RegisterConfig, SchedulerConfig
+from src.config import RegisterConfig, SchedulerConfig, TelegramConfig
 from src.db.user import UserOperate
 from src.services import get_emby_client, EmbyService
 from src.core.utils import timestamp, format_duration
@@ -130,6 +130,66 @@ class SchedulerService:
             logger.error(f"❌ Emby 同步出错: {e}")
 
     @staticmethod
+    async def enforce_group_membership():
+        """定时巡检：绑定了 TG 但已退出必需群组的用户 → 禁用本地账号 + 禁用 Emby。
+
+        仅在 `TelegramConfig.REQUIRE_GROUP_MEMBERSHIP` 开启且配置了 `GROUP_ID` 时执行。
+        管理员、白名单不会被本任务处理（在 SQL 层面就过滤掉了）。
+        """
+        from src.services.telegram_membership import TelegramMembershipService
+        if not TelegramMembershipService.enforcement_enabled():
+            return
+
+        logger.info("🛂 开始群组成员资格巡检...")
+        try:
+            users = await UserOperate.get_active_telegram_bound_users()
+            if not users:
+                logger.info("✅ 没有需要检查的用户")
+                return
+
+            disabled = 0
+            skipped = 0
+            failed = 0
+            for u in users:
+                try:
+                    ok, missing = await TelegramMembershipService.check_user_in_groups(
+                        u.TELEGRAM_ID, strict=False
+                    )
+                    if ok:
+                        skipped += 1
+                        continue
+
+                    # 拿到了「明确不在群」的判定 → 禁用
+                    success, msg = await UserService.disable_user(
+                        u, reason="未加入必需 Telegram 群组"
+                    )
+                    if success:
+                        disabled += 1
+                        logger.info(
+                            f"  ⏹️ 已禁用 {u.USERNAME} (UID: {u.UID}, "
+                            f"TG: {u.TELEGRAM_ID}) — 缺失群组: "
+                            f"{', '.join(m.id for m in missing) or '未知'}"
+                        )
+                    else:
+                        failed += 1
+                        logger.warning(
+                            f"  ⚠️ 禁用 {u.USERNAME} 失败: {msg}"
+                        )
+                except Exception as exc:  # pragma: no cover
+                    failed += 1
+                    logger.error(
+                        f"  ❌ 巡检 {u.USERNAME} (UID: {u.UID}) 出错: {exc}",
+                        exc_info=True,
+                    )
+
+            logger.info(
+                f"✅ 群组成员资格巡检完成: 仍在群 {skipped} 个, 已禁用 {disabled} 个, "
+                f"失败 {failed} 个"
+            )
+        except Exception as exc:
+            logger.error(f"❌ 群组成员资格巡检异常: {exc}", exc_info=True)
+
+    @staticmethod
     async def cleanup_no_emby_users():
         """清理注册后长期未创建 Emby 账户的用户"""
         if not RegisterConfig.AUTO_CLEANUP_NO_EMBY:
@@ -196,7 +256,18 @@ class SchedulerService:
         # 无 Emby 账户用户清理（每天过期检查后执行）
         h_cleanup, m_cleanup = parse_time(SchedulerConfig.EXPIRED_CHECK_TIME)
         scheduler.add_job(cls.cleanup_no_emby_users, 'cron', hour=h_cleanup, minute=(m_cleanup + 30) % 60, id='cleanup_no_emby')
-        
+
+        # 群组成员资格巡检（开关 + 群组配置齐备时才注册）
+        from src.services.telegram_membership import TelegramMembershipService
+        if TelegramMembershipService.enforcement_enabled():
+            interval_minutes = max(1, int(TelegramConfig.GROUP_CHECK_INTERVAL_MINUTES or 30))
+            scheduler.add_job(
+                cls.enforce_group_membership,
+                'interval',
+                minutes=interval_minutes,
+                id='enforce_group_membership',
+            )
+
         scheduler.start()
         logger.info("=" * 50)
         logger.info(f"🌙 Twilight Scheduler 已启动 ({SchedulerConfig.TIMEZONE})")
@@ -207,6 +278,10 @@ class SchedulerService:
         logger.info(f"  - Emby 同步: 每 {SchedulerConfig.EMBY_SYNC_INTERVAL} 小时")
         if RegisterConfig.AUTO_CLEANUP_NO_EMBY:
             logger.info(f"  - 无 Emby 清理: {SchedulerConfig.EXPIRED_CHECK_TIME} (注册超 {RegisterConfig.AUTO_CLEANUP_NO_EMBY_DAYS} 天)")
+        if TelegramMembershipService.enforcement_enabled():
+            logger.info(
+                f"  - 群组成员巡检: 每 {max(1, int(TelegramConfig.GROUP_CHECK_INTERVAL_MINUTES or 30))} 分钟"
+            )
         logger.info("=" * 50)
         
         # 立即运行一次统计

@@ -1085,6 +1085,20 @@ async def confirm_tg_bind_internal(bind_code: str, telegram_id: int) -> tuple[bo
             await _delete_bind_code(bind_code)
             return False, "该账号已绑定 Telegram", {}, 400
 
+        # 强制要求加入指定群组（仅在配置了 GROUP_ID 时生效）。
+        from src.services.telegram_membership import TelegramMembershipService
+        ok, missing = await TelegramMembershipService.check_user_in_groups(telegram_id, strict=True)
+        if not ok:
+            return (
+                False,
+                TelegramMembershipService.format_missing_message(missing),
+                {
+                    'reason': 'not_in_required_group',
+                    'missing_groups': [m.to_dict() for m in missing],
+                },
+                403,
+            )
+
         user.TELEGRAM_ID = telegram_id
         await UserOperate.update_user(user)
         await _delete_bind_code(bind_code)
@@ -1116,6 +1130,20 @@ async def confirm_tg_bind_internal(bind_code: str, telegram_id: int) -> tuple[bo
         existing = await UserOperate.get_user_by_telegram_id(telegram_id)
         if existing:
             return False, "该 Telegram 已绑定其他账号，一个 Telegram 只能绑定一个账号", {}, 400
+
+        # 注册阶段也强制检查群组成员资格，避免绕过 Bot 后再注册。
+        from src.services.telegram_membership import TelegramMembershipService
+        ok, missing = await TelegramMembershipService.check_user_in_groups(telegram_id, strict=True)
+        if not ok:
+            return (
+                False,
+                TelegramMembershipService.format_missing_message(missing),
+                {
+                    'reason': 'not_in_required_group',
+                    'missing_groups': [m.to_dict() for m in missing],
+                },
+                403,
+            )
 
         await TelegramBindCodeOperate.upsert_code(
             code=code_info.CODE,

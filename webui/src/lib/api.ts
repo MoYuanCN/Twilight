@@ -453,9 +453,10 @@ class ApiClient {
     const query = new URLSearchParams();
     if (params.page) query.set("page", String(params.page));
     if (params.per_page) query.set("per_page", String(params.per_page));
-    if (params.role !== undefined) query.set("role", String(params.role));
-    if (params.active !== undefined) query.set("active", String(params.active));
+    if (params.role !== undefined && params.role !== null) query.set("role", String(params.role));
+    if (params.active !== undefined && params.active !== null) query.set("active", String(params.active));
     if (params.search) query.set("search", params.search);
+    if (params.sort) query.set("sort", params.sort);
     return this.request<AdminUserListResponse>(`/admin/users?${query}`, { signal });
   }
 
@@ -1203,9 +1204,10 @@ export interface EmbyRegisterStatus {
 export interface AdminUserListParams {
   page?: number;
   per_page?: number;
-  role?: number;
-  active?: boolean;
+  role?: number | null;
+  active?: boolean | null;
   search?: string;
+  sort?: string;
 }
 
 export interface AdminUserListResponse {

@@ -58,6 +58,10 @@ export default function AdminUsersPage() {
   const [perPage, setPerPage] = useState(20);
   const [pages, setPages] = useState(1);
   const [search, setSearch] = useState("");
+  // 筛选 / 排序
+  const [roleFilter, setRoleFilter] = useState<string>("all"); // "all" | "0" | "1" | "2"
+  const [activeFilter, setActiveFilter] = useState<string>("all"); // "all" | "true" | "false"
+  const [sortBy, setSortBy] = useState<string>("uid_desc");
   const [expandedUserIds, setExpandedUserIds] = useState<Set<number>>(new Set());
 
   // Dialog states
@@ -101,7 +105,7 @@ export default function AdminUsersPage() {
   };
 
   const loadUsersResource = useCallback(async (signal?: AbortSignal) => {
-    const cacheKey = `${page}-${perPage}-${search || ""}`;
+    const cacheKey = `${page}-${perPage}-${search || ""}-${roleFilter}-${activeFilter}-${sortBy}`;
     const cached = usersCacheRef.current.get(cacheKey);
     if (cached) {
       setUsers(cached.users);
@@ -110,10 +114,17 @@ export default function AdminUsersPage() {
       return true;
     }
 
+    const role = roleFilter === "all" ? undefined : Number(roleFilter);
+    const active =
+      activeFilter === "all" ? undefined : activeFilter === "true";
+
     const res = await api.getUsers({
       page,
       per_page: perPage,
       search: search || undefined,
+      role,
+      active,
+      sort: sortBy || undefined,
     }, signal);
     if (res.success && res.data) {
       setUsers(res.data.users);
@@ -126,7 +137,7 @@ export default function AdminUsersPage() {
       });
     }
     return true;
-  }, [page, perPage, search]);
+  }, [page, perPage, search, roleFilter, activeFilter, sortBy]);
 
   const {
     isLoading,
@@ -148,6 +159,16 @@ export default function AdminUsersPage() {
       loadedUsersRef.current = true;
     }
   }, [page, perPage, loadUsers]);
+
+  // 筛选/排序变更：重置页码并立即刷新（绕过 perPage useEffect 的边界条件）
+  useEffect(() => {
+    if (!loadedUsersRef.current) return;
+    setPage(1);
+    invalidateUsersCache();
+    setExpandedUserIds(new Set());
+    void loadUsers();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roleFilter, activeFilter, sortBy]);
 
   const handleRenew = async () => {
     if (!selectedUser || !renewDays) return;
@@ -401,7 +422,7 @@ export default function AdminUsersPage() {
 
       {/* Search */}
       <Card>
-        <CardContent className="pt-6">
+        <CardContent className="pt-6 space-y-3">
           <div className="flex flex-col gap-3 md:flex-row md:gap-4">
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -430,6 +451,76 @@ export default function AdminUsersPage() {
               </Button>
             </div>
           </div>
+
+          {/* 筛选 / 排序 */}
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <div className="space-y-1">
+              <p className="text-xs text-muted-foreground">角色</p>
+              <Select value={roleFilter} onValueChange={setRoleFilter}>
+                <SelectTrigger>
+                  <SelectValue placeholder="全部角色" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">全部角色</SelectItem>
+                  <SelectItem value="0">管理员</SelectItem>
+                  <SelectItem value="2">白名单</SelectItem>
+                  <SelectItem value="1">普通用户</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <p className="text-xs text-muted-foreground">状态</p>
+              <Select value={activeFilter} onValueChange={setActiveFilter}>
+                <SelectTrigger>
+                  <SelectValue placeholder="全部状态" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">全部状态</SelectItem>
+                  <SelectItem value="true">仅已启用</SelectItem>
+                  <SelectItem value="false">仅已禁用</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <p className="text-xs text-muted-foreground">排序</p>
+              <Select value={sortBy} onValueChange={setSortBy}>
+                <SelectTrigger>
+                  <SelectValue placeholder="排序" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="uid_desc">UID 从新到旧</SelectItem>
+                  <SelectItem value="uid_asc">UID 从旧到新</SelectItem>
+                  <SelectItem value="username_asc">用户名 A→Z</SelectItem>
+                  <SelectItem value="username_desc">用户名 Z→A</SelectItem>
+                  <SelectItem value="register_time_desc">注册时间 新→旧</SelectItem>
+                  <SelectItem value="register_time_asc">注册时间 旧→新</SelectItem>
+                  <SelectItem value="expired_at_asc">到期时间 近→远</SelectItem>
+                  <SelectItem value="expired_at_desc">到期时间 远→近</SelectItem>
+                  <SelectItem value="last_login_time_desc">最近登录 新→旧</SelectItem>
+                  <SelectItem value="role_asc">角色 管理→普通</SelectItem>
+                  <SelectItem value="active_desc">状态 启用优先</SelectItem>
+                  <SelectItem value="active_asc">状态 禁用优先</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          {(roleFilter !== "all" || activeFilter !== "all" || sortBy !== "uid_desc") && (
+            <div className="flex items-center justify-between text-xs text-muted-foreground">
+              <span>已应用筛选 / 排序</span>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setRoleFilter("all");
+                  setActiveFilter("all");
+                  setSortBy("uid_desc");
+                }}
+              >
+                重置
+              </Button>
+            </div>
+          )}
         </CardContent>
       </Card>
 

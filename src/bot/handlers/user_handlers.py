@@ -398,6 +398,19 @@ def register(bot):
                 "仍失败请重新生成绑定码。\n\n"
                 "你可以重新发送绑定码，或发送 /cancel 取消。"
             )
+        elif d.get('reason') == 'not_in_required_group':
+            missing = d.get('missing_groups') or []
+            buttons = []
+            for g in missing:
+                if g.get('url'):
+                    label = g.get('title') or g.get('id') or '加入群组'
+                    buttons.append([InlineKeyboardButton(f"👥 加入 {label}", url=g['url'])])
+            reply_markup = InlineKeyboardMarkup(buttons) if buttons else None
+            await update.message.reply_text(
+                f"❌ 绑定失败: 你尚未加入必需群组\n\n{message or ''}\n\n"
+                "加入后请重新发送绑定码再试一次，或发送 /cancel 取消。",
+                reply_markup=reply_markup,
+            )
         else:
             await update.message.reply_text(
                 f"❌ 绑定失败: {message or '未知错误'}\n\n请重新发送 8 位绑定码，或发送 /cancel 取消"
