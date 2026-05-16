@@ -80,10 +80,11 @@ class EmbyService:
     async def sync_all_users() -> Tuple[int, int, List[str]]:
         """
         批量同步所有用户状态（Twilight DB ↔ Emby）
-        
+
         - 检测并清理孤儿记录（Emby 用户已删除但 DB 仍有 EMBYID）
         - 同步用户名不一致的情况
         - 同步启用/禁用状态
+        - 强制关闭非管理员的「允许下载内容」权限（EnableContentDownloading=False）
 
         :return: (成功数, 失败数, 错误列表)
         """
@@ -91,17 +92,18 @@ class EmbyService:
         success_count = 0
         fail_count = 0
         errors = []
-        
+        download_disabled_count = 0
+
         try:
             emby_users = await emby.get_users()
             emby_user_map = {u.id: u for u in emby_users}
-            
+
             local_users = await UserOperate.get_all_emby_users()
-            
+
             for user in local_users:
                 try:
                     emby_user = emby_user_map.get(user.EMBYID)
-                    
+
                     if emby_user is None:
                         # Emby 用户已被外部删除，清理本地记录
                         logger.warning(
@@ -113,7 +115,7 @@ class EmbyService:
                         errors.append(f"{user.USERNAME}: Emby 用户不存在，已清理 EMBYID")
                         fail_count += 1
                         continue
-                    
+
                     # 同步 Emby 用户名到 OTHER，不覆盖本地系统用户名
                     other_data = {}
                     if user.OTHER:
@@ -138,6 +140,26 @@ class EmbyService:
                         user.ACTIVE_STATUS = False
                         await UserOperate.update_user(user)
 
+                    # 强制关闭非管理员的下载权限（防止历史遗留账户残留 True）
+                    is_emby_admin = bool(emby_user.policy.get('IsAdministrator', False))
+                    if (
+                        not is_emby_admin
+                        and bool(emby_user.policy.get('EnableContentDownloading', True))
+                    ):
+                        try:
+                            ok = await emby.update_user_policy(
+                                user.EMBYID, {'EnableContentDownloading': False}
+                            )
+                            if ok:
+                                download_disabled_count += 1
+                                logger.info(
+                                    f"已关闭下载权限: {user.USERNAME} (UID: {user.UID})"
+                                )
+                        except EmbyError as exc:
+                            logger.warning(
+                                f"关闭下载权限失败 {user.USERNAME} (UID: {user.UID}): {exc}"
+                            )
+
                     from src.services.user_service import UserService
                     ok, msg = await UserService.sync_user_to_emby(user)
                     if ok:
@@ -145,14 +167,15 @@ class EmbyService:
                     else:
                         fail_count += 1
                         errors.append(f"{user.USERNAME}: {msg}")
-                        
+
                 except Exception as e:
                     fail_count += 1
                     errors.append(f"{user.USERNAME}: {str(e)}")
                     logger.error(f"同步用户 {user.USERNAME} 失败: {e}")
-            
+
             logger.info(
-                f"批量同步完成: 成功 {success_count}, 失败 {fail_count}"
+                f"批量同步完成: 成功 {success_count}, 失败 {fail_count}, "
+                f"关闭下载权限 {download_disabled_count}"
             )
             return success_count, fail_count, errors
         except EmbyError as e:

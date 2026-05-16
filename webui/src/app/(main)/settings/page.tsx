@@ -802,9 +802,9 @@ export default function SettingsPage() {
                       Emby ID: {user.emby_id}
                     </p>
                   )}
-                  {user?.username && user?.emby_id && (
+                  {user?.emby_id && (user.emby_username || user.username) && (
                     <p className="text-sm text-muted-foreground">
-                      用户名: {user.username}
+                      Emby 用户名: {user.emby_username || user.username}
                     </p>
                   )}
                 </div>

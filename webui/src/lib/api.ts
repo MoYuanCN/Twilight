@@ -957,6 +957,7 @@ export interface UserInfo {
   expire_status?: string;  // 后端计算的状态文本（"永不过期"/"已过期"/"剩余 x天"）
   expired_at?: string | number;  // 可能是时间戳或字符串，-1 表示永久
   emby_id?: string;
+  emby_username?: string;  // 绑定的 Emby 用户名（与系统用户名独立）
   avatar?: string;
   bgm_mode: boolean;
   created_at?: string | number;

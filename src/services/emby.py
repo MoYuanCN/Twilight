@@ -464,14 +464,27 @@ class EmbyClient:
         return None
 
     async def create_user(self, username: str, password: str = '') -> Optional[EmbyUser]:
-        """创建新用户"""
+        """创建新用户。
+
+        默认禁用媒体下载权限（EnableContentDownloading=False），避免新建账户
+        自动拥有「下载到本地」能力。
+        """
         data = await self._request('POST', '/Users/New', json={'Name': username})
-        
-        if data and password:
-            user_id = data.get('Id')
-            await self.set_user_password(user_id, password)
-        
+
         if data:
+            user_id = data.get('Id')
+            if user_id:
+                # 关闭下载权限：Emby/Jellyfin 默认 True，注册场景一律收紧。
+                try:
+                    await self.update_user_policy(user_id, {'EnableContentDownloading': False})
+                except EmbyError as exc:
+                    logger.warning(
+                        f"新建 Emby 用户后禁用下载权限失败 ({username}, id={user_id}): {exc}"
+                    )
+
+            if password:
+                await self.set_user_password(user_id, password)
+
             self._users_cache.clear()
             return EmbyUser.from_dict(data)
         return None
