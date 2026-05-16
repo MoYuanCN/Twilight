@@ -83,6 +83,15 @@ export default function AdminUsersPage() {
     emby_id: "",
     active: true,
   });
+
+  // 强制重置 Emby 密码（按 Emby 用户名）
+  const [forcePwdOpen, setForcePwdOpen] = useState(false);
+  const [forcePwdEmbyName, setForcePwdEmbyName] = useState("");
+  const [forcePwdNewPwd, setForcePwdNewPwd] = useState("");
+  const [forcePwdAuto, setForcePwdAuto] = useState(true);
+  const [forcePwdLoading, setForcePwdLoading] = useState(false);
+  const [forcePwdResult, setForcePwdResult] = useState<null | { emby_username: string; linked_local_user: boolean; new_password: string }>(null);
+
   const usersCacheRef = useRef<
     Map<string, { users: UserInfo[]; total: number; pages: number }>
   >(new Map());
@@ -169,6 +178,52 @@ export default function AdminUsersPage() {
     void loadUsers();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roleFilter, activeFilter, sortBy]);
+
+  const handleForceSetEmbyPassword = async () => {
+    const emby = forcePwdEmbyName.trim();
+    if (!emby) {
+      toast({ title: "请输入 Emby 用户名", variant: "destructive" });
+      return;
+    }
+    if (!forcePwdAuto) {
+      const pwd = forcePwdNewPwd;
+      if (pwd.length < 8 || !/[a-z]/.test(pwd) || !/[A-Z]/.test(pwd) || !/\d/.test(pwd)) {
+        toast({
+          title: "密码强度不足",
+          description: "至少 8 位，且包含大小写字母和数字",
+          variant: "destructive",
+        });
+        return;
+      }
+    }
+    setForcePwdLoading(true);
+    try {
+      const res = await api.adminForceSetEmbyPassword(
+        emby,
+        forcePwdAuto ? undefined : forcePwdNewPwd,
+      );
+      if (res.success && res.data) {
+        setForcePwdResult({
+          emby_username: res.data.emby_username,
+          linked_local_user: res.data.linked_local_user,
+          new_password: res.data.new_password,
+        });
+        toast({
+          title: "Emby 密码已重置",
+          description: res.data.linked_local_user
+            ? "本地账号密码已同步"
+            : "该 Emby 用户当前未绑定本地账号",
+          variant: "success",
+        });
+      } else {
+        toast({ title: "重置失败", description: res.message, variant: "destructive" });
+      }
+    } catch (error: any) {
+      toast({ title: "重置失败", description: error.message, variant: "destructive" });
+    } finally {
+      setForcePwdLoading(false);
+    }
+  };
 
   const handleRenew = async () => {
     if (!selectedUser || !renewDays) return;
@@ -401,7 +456,20 @@ export default function AdminUsersPage() {
           <h1 className="text-3xl font-bold">用户管理</h1>
           <p className="text-muted-foreground">管理所有注册用户</p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <Button
+            variant="outline"
+            onClick={() => {
+              setForcePwdEmbyName("");
+              setForcePwdNewPwd("");
+              setForcePwdAuto(true);
+              setForcePwdResult(null);
+              setForcePwdOpen(true);
+            }}
+          >
+            <Key className="mr-2 h-4 w-4" />
+            按 Emby 用户名改密
+          </Button>
           <Button
             variant="outline"
             className="text-destructive hover:text-destructive"
@@ -558,6 +626,23 @@ export default function AdminUsersPage() {
                       </div>
                     </div>
                     <div>
+                      <p className="text-xs text-muted-foreground">Emby</p>
+                      <div className="mt-1 flex flex-col gap-0.5 min-w-0">
+                        {user.emby_id ? (
+                          <>
+                            <Badge variant="success" className="w-fit text-[10px]">已绑定</Badge>
+                            <span className="text-xs text-muted-foreground truncate" title={user.emby_username || user.username}>
+                              {user.emby_username || user.username}
+                            </span>
+                          </>
+                        ) : (
+                          <Badge variant="outline" className="w-fit text-[10px] text-muted-foreground">
+                            未绑定
+                          </Badge>
+                        )}
+                      </div>
+                    </div>
+                    <div>
                       <p className="text-xs text-muted-foreground">到期时间</p>
                       <p className={user.expired_at && new Date(user.expired_at) < new Date() ? "mt-1 text-destructive" : "mt-1"}>
                         {user.expired_at ? formatDate(user.expired_at) : "永久"}
@@ -572,7 +657,7 @@ export default function AdminUsersPage() {
                           TG: {user.telegram_username ? `@${user.telegram_username} (${user.telegram_id})` : user.telegram_id}
                         </p>
                       )}
-                      {user.emby_id && <p>Emby ID: {user.emby_id}</p>}
+                      {user.emby_id && <p className="break-all">Emby ID: {user.emby_id}</p>}
                     </div>
                   )}
                 </div>
@@ -586,6 +671,7 @@ export default function AdminUsersPage() {
                     <th className="px-4 py-3 text-left text-sm font-medium">用户</th>
                     <th className="px-4 py-3 text-left text-sm font-medium">角色</th>
                     <th className="px-4 py-3 text-left text-sm font-medium">状态</th>
+                    <th className="px-4 py-3 text-left text-sm font-medium">Emby</th>
                     <th className="px-4 py-3 text-left text-sm font-medium">到期时间</th>
                     <th className="px-4 py-3 text-right text-sm font-medium">操作</th>
                   </tr>
@@ -630,6 +716,23 @@ export default function AdminUsersPage() {
                           {user.active ? "正常" : "禁用"}
                         </Badge>
                       </td>
+                      <td className="px-4 py-3">
+                        {user.emby_id ? (
+                          <div className="flex flex-col gap-0.5 min-w-0">
+                            <Badge variant="success" className="w-fit text-[10px]">已绑定</Badge>
+                            <span
+                              className="text-xs text-muted-foreground truncate max-w-[160px]"
+                              title={user.emby_username || user.username}
+                            >
+                              {user.emby_username || user.username}
+                            </span>
+                          </div>
+                        ) : (
+                          <Badge variant="outline" className="text-[10px] text-muted-foreground">
+                            未绑定
+                          </Badge>
+                        )}
+                      </td>
                       <td className="px-4 py-3 text-sm">
                         {user.expired_at ? (
                           <span className={new Date(user.expired_at) < new Date() ? "text-destructive" : ""}>
@@ -645,7 +748,7 @@ export default function AdminUsersPage() {
                     </tr>
                     {expandedUserIds.has(user.uid) && (
                       <tr className="bg-muted/10">
-                        <td colSpan={5} className="px-4 py-3 text-sm text-muted-foreground">
+                        <td colSpan={6} className="px-4 py-3 text-sm text-muted-foreground">
                           <div className="grid gap-3 sm:grid-cols-2">
                             <div>
                               <p className="font-medium">更多信息</p>
@@ -834,6 +937,105 @@ export default function AdminUsersPage() {
               确认清理
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Force-set Emby Password Dialog */}
+      <Dialog
+        open={forcePwdOpen}
+        onOpenChange={(open) => {
+          setForcePwdOpen(open);
+          if (!open) {
+            setForcePwdEmbyName("");
+            setForcePwdNewPwd("");
+            setForcePwdAuto(true);
+            setForcePwdResult(null);
+          }
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>强制重置 Emby 密码</DialogTitle>
+            <DialogDescription>
+              通过 Emby 用户名直接重置密码。即使该 Emby 账号没有绑定本地系统账号也可执行。
+            </DialogDescription>
+          </DialogHeader>
+          {forcePwdResult ? (
+            <div className="space-y-3">
+              <div className="rounded-lg border bg-muted/30 p-3 space-y-1.5">
+                <p className="text-sm">
+                  <span className="text-muted-foreground">Emby 用户：</span>
+                  <span className="font-medium break-all">{forcePwdResult.emby_username}</span>
+                </p>
+                <p className="text-sm">
+                  <span className="text-muted-foreground">绑定本地账号：</span>
+                  <span className="font-medium">{forcePwdResult.linked_local_user ? "是" : "否"}</span>
+                </p>
+                <p className="text-sm">
+                  <span className="text-muted-foreground">新密码：</span>
+                </p>
+                <code className="block break-all rounded bg-background px-2 py-1.5 text-base font-mono">
+                  {forcePwdResult.new_password}
+                </code>
+                <p className="text-xs text-muted-foreground">请尽快将新密码告知用户。该密码仅本次显示。</p>
+              </div>
+              <DialogFooter>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    void navigator.clipboard.writeText(forcePwdResult.new_password);
+                    toast({ title: "已复制到剪贴板", variant: "success" });
+                  }}
+                >
+                  复制密码
+                </Button>
+                <Button onClick={() => setForcePwdOpen(false)}>完成</Button>
+              </DialogFooter>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label>Emby 用户名</Label>
+                <Input
+                  placeholder="输入要重置密码的 Emby 用户名"
+                  value={forcePwdEmbyName}
+                  onChange={(e) => setForcePwdEmbyName(e.target.value)}
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="forcePwdAuto"
+                  checked={forcePwdAuto}
+                  onChange={(e) => setForcePwdAuto(e.target.checked)}
+                  className="h-4 w-4 rounded"
+                />
+                <Label htmlFor="forcePwdAuto" className="cursor-pointer">
+                  自动生成 12 位强密码
+                </Label>
+              </div>
+              {!forcePwdAuto && (
+                <div className="space-y-2">
+                  <Label>新密码</Label>
+                  <Input
+                    type="text"
+                    placeholder="至少 8 位，含大小写字母和数字"
+                    value={forcePwdNewPwd}
+                    onChange={(e) => setForcePwdNewPwd(e.target.value)}
+                  />
+                </div>
+              )}
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setForcePwdOpen(false)}>
+                  取消
+                </Button>
+                <Button onClick={handleForceSetEmbyPassword} disabled={forcePwdLoading}>
+                  {forcePwdLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  确认重置
+                </Button>
+              </DialogFooter>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
 

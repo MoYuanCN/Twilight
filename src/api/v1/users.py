@@ -1052,6 +1052,42 @@ async def generate_tg_register_bind_code():
     })
 
 
+@users_bp.route('/telegram/register/bind-code/status', methods=['GET'])
+async def query_tg_register_bind_code_status():
+    """注册阶段轮询绑定码是否已被 Bot 端确认。无需登录。
+
+    Query:
+        code: str - 注册绑定码（8 位）
+
+    Response data:
+        {
+            "code": "ABCDEFGH",
+            "confirmed": true,                  // 用户已通过 /bind 完成验证
+            "expires_in": 117                   // 剩余秒数；过期为 0
+        }
+    """
+    from src.config import Config, TelegramConfig
+
+    code = (request.args.get('code') or '').strip().upper()
+    if not code or len(code) != 8 or not code.isalnum():
+        return api_response(False, "绑定码格式无效", code=400)
+
+    if not Config.TELEGRAM_MODE or not TelegramConfig.BOT_TOKEN:
+        return api_response(False, "Telegram Bot 未启用", code=400)
+
+    code_info = await TelegramBindCodeOperate.get_code(code)
+    if not code_info or code_info.SCENE != _BIND_SCENE_REGISTER:
+        # 不暴露具体过期/无效，避免被探测
+        return api_response(False, "绑定码无效或已过期", code=404)
+
+    remaining = max(0, int(code_info.EXPIRES_AT - _time.time()))
+    return api_response(True, "获取成功", {
+        'code': code_info.CODE,
+        'confirmed': bool(code_info.CONFIRMED_TELEGRAM_ID),
+        'expires_in': remaining,
+    })
+
+
 async def confirm_tg_bind_internal(bind_code: str, telegram_id: int) -> tuple[bool, str, dict[str, Any], int]:
     """供 Bot 与内部接口复用的 Telegram 绑定确认逻辑。"""
     bind_code = (bind_code or '').strip().upper()

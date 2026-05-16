@@ -79,6 +79,7 @@ export default function DashboardPage() {
   const [embyInfo, setEmbyInfo] = useState<EmbyInfo | null>(null);
   const [myRequests, setMyRequests] = useState<MediaRequest[]>([]);
   const [lineSlots, setLineSlots] = useState<LineSlot[]>([]);
+  const [linesRequireEmby, setLinesRequireEmby] = useState(false);
   const [lineLatencyMap, setLineLatencyMap] = useState<Record<string, LineLatencyInfo>>({});
   const [isLatencyTesting, setIsLatencyTesting] = useState(false);
 
@@ -114,6 +115,7 @@ export default function DashboardPage() {
         scope: "wl" as const,
       }));
       setLineSlots([...lines, ...wl]);
+      setLinesRequireEmby(Boolean(urlsRes.data.requires_emby_account));
     }
     if (reqRes && reqRes.success && Array.isArray(reqRes.data)) {
       setMyRequests(reqRes.data);
@@ -551,7 +553,8 @@ export default function DashboardPage() {
         </motion.div>
       </div>
 
-      {/* 线路延迟 */}
+      {/* 线路延迟 —— 仅在用户已绑定 Emby 时显示，避免预先泄露线路 */}
+      {!linesRequireEmby && (
       <motion.div variants={item} className="premium-card p-5 sm:p-6">
         <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
           <div className="flex items-center gap-3 min-w-0">
@@ -615,6 +618,7 @@ export default function DashboardPage() {
           </div>
         )}
       </motion.div>
+      )}
 
       {/* 注册码/续期码 */}
       <motion.div variants={item} className="premium-card p-5 sm:p-6">

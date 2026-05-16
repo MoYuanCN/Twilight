@@ -264,6 +264,14 @@ class ApiClient {
     });
   }
 
+  async getRegisterBindCodeStatus(code: string, signal?: AbortSignal) {
+    const q = new URLSearchParams({ code }).toString();
+    return this.request<{ code: string; confirmed: boolean; expires_in: number }>(
+      `/users/telegram/register/bind-code/status?${q}`,
+      { signal },
+    );
+  }
+
   async getRegisterAvailability() {
     return this.request<RegisterAvailability>("/users/check-available");
   }
@@ -327,7 +335,11 @@ class ApiClient {
   }
 
   async getEmbyUrls() {
-    return this.request<{ lines: Array<{ name: string; url: string }>; whitelist_lines?: Array<{ name: string; url: string }> }>(`/system/emby-urls`);
+    return this.request<{
+      lines: Array<{ name: string; url: string }>;
+      whitelist_lines?: Array<{ name: string; url: string }>;
+      requires_emby_account?: boolean;
+    }>(`/system/emby-urls`);
   }
 
   async checkRegcode(regCode: string) {
@@ -494,6 +506,26 @@ class ApiClient {
   async resetPassword(uid: number) {
     return this.request<{ new_password: string }>(`/admin/users/${uid}/reset-password`, {
       method: "POST",
+    });
+  }
+
+  /**
+   * 管理员凭 Emby 用户名强制重置 Emby 密码（即使没有绑定本地账号）。
+   * @param embyUsername 目标 Emby 用户名
+   * @param newPassword 可选；省略时后端生成 12 位强密码并在响应里返回
+   */
+  async adminForceSetEmbyPassword(embyUsername: string, newPassword?: string) {
+    return this.request<{
+      emby_id: string;
+      emby_username: string;
+      linked_local_user: boolean;
+      new_password: string;
+    }>(`/admin/emby/force-set-password`, {
+      method: "POST",
+      body: JSON.stringify({
+        emby_username: embyUsername,
+        new_password: newPassword || undefined,
+      }),
     });
   }
 

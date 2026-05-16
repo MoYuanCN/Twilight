@@ -312,6 +312,88 @@ async def renew_user(uid: int):
     return api_response(success, message)
 
 
+@admin_bp.route('/emby/force-set-password', methods=['POST'])
+@require_auth
+@require_admin
+async def admin_force_set_emby_password():
+    """直接根据 Emby 用户名重置该 Emby 账号的密码（即使没有绑定本地用户）。
+
+    Request:
+        {
+            "emby_username": "ada",
+            "new_password": "Abcd1234"   // 可选，省略则随机生成 12 位强密码
+        }
+
+    Response data:
+        {
+            "emby_id": "...",
+            "emby_username": "ada",
+            "new_password": "..."    // 仅当现场生成或显式指定时返回
+        }
+    """
+    from src.services.user_service import UserService
+    from src.services.emby import get_emby_client, EmbyError
+    from src.core.utils import generate_password, hash_password
+
+    data = request.get_json() or {}
+    emby_username = (data.get('emby_username') or '').strip()
+    new_password = data.get('new_password')
+
+    if not emby_username:
+        return api_response(False, "缺少 emby_username", code=400)
+
+    auto_generated = False
+    if new_password:
+        ok, msg = UserService.validate_password_strength(new_password, label="新密码")
+        if not ok:
+            return api_response(False, msg, code=400)
+    else:
+        new_password = generate_password(12)
+        auto_generated = True
+
+    emby = get_emby_client()
+    try:
+        emby_user = await emby.get_user_by_name(emby_username)
+    except EmbyError as e:
+        return api_response(False, f"查询 Emby 用户失败: {e}", code=502)
+    if not emby_user:
+        return api_response(False, f"Emby 中找不到用户「{emby_username}」", code=404)
+
+    # 禁止操作 Emby 管理员，避免越权
+    if bool(emby_user.policy.get('IsAdministrator', False)):
+        return api_response(False, "不允许通过此接口重置 Emby 管理员密码", code=403)
+
+    try:
+        await emby.reset_user_password(emby_user.id)
+        ok = await emby.set_user_password(emby_user.id, new_password)
+        if not ok:
+            return api_response(False, "Emby 设置新密码失败", code=502)
+    except EmbyError as e:
+        logger.error(f"重置 Emby 密码失败 ({emby_username}): {e}", exc_info=True)
+        return api_response(False, f"重置失败: {e}", code=502)
+
+    # 如有本地账号绑定到这个 EMBYID，同步刷新本地系统密码哈希以免双密码漂移
+    local = await UserOperate.get_user_by_embyid(emby_user.id)
+    if local is not None:
+        try:
+            local.PASSWORD = hash_password(new_password)
+            await UserOperate.update_user(local)
+        except Exception as exc:  # pragma: no cover - DB safety
+            logger.warning(f"同步本地密码哈希失败 ({local.USERNAME}): {exc}")
+
+    logger.info(
+        f"管理员 {g.current_user.USERNAME} 强制重置 Emby 密码: {emby_username} "
+        f"(EMBYID={emby_user.id}{', 本地账号已同步' if local else ', 无本地绑定'})"
+    )
+
+    return api_response(True, "Emby 密码已重置", {
+        'emby_id': emby_user.id,
+        'emby_username': emby_user.name,
+        'linked_local_user': bool(local),
+        'new_password': new_password if auto_generated else new_password,
+    })
+
+
 @admin_bp.route('/users/<int:uid>/reset-password', methods=['POST'])
 @require_auth
 @require_admin

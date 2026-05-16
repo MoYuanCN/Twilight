@@ -116,6 +116,7 @@ export default function SettingsPage() {
   // Emby URLs
   const [embyLines, setEmbyLines] = useState<Array<{ name: string; url: string }>>([]);
   const [whitelistLines, setWhitelistLines] = useState<Array<{ name: string; url: string }>>([]);
+  const [linesRequireEmby, setLinesRequireEmby] = useState(false);
   const [copiedIndex, setCopiedIndex] = useState<string | null>(null);
   const [lineLatencyMap, setLineLatencyMap] = useState<Record<string, { status: "idle" | "testing" | "ok" | "timeout" | "error"; latencyMs?: number }>>({});
   const [isLatencyTesting, setIsLatencyTesting] = useState(false);
@@ -500,6 +501,7 @@ export default function SettingsPage() {
       if (res.success && res.data) {
         setEmbyLines(res.data.lines);
         setWhitelistLines(res.data.whitelist_lines || []);
+        setLinesRequireEmby(Boolean(res.data.requires_emby_account));
       }
     });
   }, []);
@@ -913,7 +915,8 @@ export default function SettingsPage() {
         </Card>
       </motion.div>
 
-      {/* 服务器线路 */}
+      {/* 服务器线路 —— 仅在用户已绑定 Emby 时显示，避免预先泄露线路 */}
+      {!linesRequireEmby && (
       <motion.div variants={item}>
         <Card className="glass-card">
           <CardHeader>
@@ -1020,6 +1023,7 @@ export default function SettingsPage() {
           </CardContent>
         </Card>
       </motion.div>
+      )}
 
       {/* Preferences */}
       <motion.div variants={item}>

@@ -281,32 +281,45 @@ async def system_stats():
 async def get_emby_urls():
     """
     获取 Emby 服务器线路列表
-    
+
     根据用户角色返回不同线路：
     - 普通用户：返回普通线路列表
     - 白名单/管理员：额外返回白名单专属线路
-    
+
+    未绑定 Emby 账号的用户会拿到空 `lines`，避免在用户尚不持有 Emby 账号时就
+    把服务器地址泄露给浏览器。
+
     返回结构化数据: { lines: [{name, url, tag?}], whitelist_lines?: [{name, url, tag?}] }
     """
     from src.db.user import Role
-    
+
+    user = getattr(g, 'current_user', None)
+    is_admin = bool(user and user.ROLE == Role.ADMIN.value)
+
+    # 没绑定 Emby 且不是管理员 → 不下发任何线路，前端会据此隐藏整块 UI
+    if user and not user.EMBYID and not is_admin:
+        return api_response(True, "未绑定 Emby 账号，未下发线路", {
+            'lines': [],
+            'requires_emby_account': True,
+        })
+
     def parse_url_entry(entry: str) -> dict:
         """解析 'Label : http://...' 格式"""
         if ' : ' in entry:
             parts = entry.split(' : ', 1)
             return {'name': parts[0].strip(), 'url': parts[1].strip()}
         return {'name': '默认线路', 'url': entry.strip()}
-    
+
     lines = [parse_url_entry(u) for u in EmbyConfig.EMBY_URL_LIST]
-    
+
     result = {'lines': lines}
-    
+
     # 白名单/管理员用户额外返回专属线路
-    if g.current_user and g.current_user.ROLE in (Role.ADMIN.value, Role.WHITE_LIST.value):
+    if user and user.ROLE in (Role.ADMIN.value, Role.WHITE_LIST.value):
         whitelist_lines = [parse_url_entry(u) for u in EmbyConfig.EMBY_URL_LIST_FOR_WHITELIST]
         if whitelist_lines:
             result['whitelist_lines'] = whitelist_lines
-    
+
     return api_response(True, "获取成功", result)
 
 

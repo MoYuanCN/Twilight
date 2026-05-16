@@ -46,6 +46,7 @@ export default function RegisterPage() {
   const [registerAvailability, setRegisterAvailability] = useState<RegisterAvailability | null>(null);
   const [bindCode, setBindCode] = useState("");
   const [bindCodeExpiry, setBindCodeExpiry] = useState(0);
+  const [bindConfirmed, setBindConfirmed] = useState(false);
 
   const [isRegisterLoading, setIsRegisterLoading] = useState(false);
   const [isBindCodeLoading, setIsBindCodeLoading] = useState(false);
@@ -100,6 +101,7 @@ export default function RegisterPage() {
       const res = await api.getRegisterBindCode();
       setBindCode(res.data?.bind_code || "");
       setBindCodeExpiry(res.data?.expires_in ?? 0);
+      setBindConfirmed(false);
       toast({
         title: "已生成绑定码",
         description: "请在 Telegram Bot 私聊中发送 /bind <绑定码> 完成验证",
@@ -115,6 +117,60 @@ export default function RegisterPage() {
       setIsBindCodeLoading(false);
     }
   };
+
+  // 拿到绑定码后开始轮询，直到 Bot 端确认或绑定码过期。
+  useEffect(() => {
+    if (!bindCode || bindConfirmed) return;
+
+    let cancelled = false;
+    let toastedConfirmed = false;
+    const controller = new AbortController();
+
+    const tick = async () => {
+      try {
+        const res = await api.getRegisterBindCodeStatus(bindCode, controller.signal);
+        if (cancelled) return;
+        if (res.success && res.data) {
+          if (typeof res.data.expires_in === "number") {
+            setBindCodeExpiry(res.data.expires_in);
+          }
+          if (res.data.confirmed && !toastedConfirmed) {
+            toastedConfirmed = true;
+            setBindConfirmed(true);
+            toast({
+              title: "Telegram 绑定成功",
+              description: "点击下方「注册」按钮即可进入系统",
+              variant: "success",
+            });
+          }
+        } else if (res.message && /无效|过期/.test(res.message)) {
+          // 后端把过期/无效都返回 404；视作过期，清空绑定码让用户重新生成。
+          if (!cancelled) {
+            setBindCode("");
+            setBindCodeExpiry(0);
+            setBindConfirmed(false);
+            toast({
+              title: "绑定码已过期",
+              description: "请重新获取绑定码",
+              variant: "destructive",
+            });
+          }
+        }
+      } catch {
+        // 静默重试，避免污染 toast
+      }
+    };
+
+    // 立即先跑一次，之后每 2 秒一次
+    void tick();
+    const handle = window.setInterval(tick, 2000);
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+      window.clearInterval(handle);
+    };
+  }, [bindCode, bindConfirmed, toast]);
 
   const pollEmbyQueueStatus = async (ticket = queueTicket) => {
     if (!ticket) return;
@@ -200,6 +256,15 @@ export default function RegisterPage() {
       toast({
         title: "请先完成 Telegram 绑定验证",
         description: "点击获取绑定码后，在 Bot 私聊发送 /bind <绑定码>",
+        variant: "destructive",
+      });
+      return false;
+    }
+
+    if ((forceBindTelegram || registerTarget === "emby") && bindCode && !bindConfirmed) {
+      toast({
+        title: "请先在 Telegram 完成绑定验证",
+        description: `请去 Bot 私聊发送 /bind ${bindCode}`,
         variant: "destructive",
       });
       return false;
@@ -575,11 +640,24 @@ export default function RegisterPage() {
                           </a>
                         </Button>
                       ) : null}
-                      {bindCode ? (
+                      {bindCode && !bindConfirmed ? (
                         <div className="rounded-lg border border-border/70 bg-muted/50 px-3 py-2 text-sm text-muted-foreground">
                           <p>请到 Bot 私聊发送：</p>
                           <p className="font-mono text-base text-foreground">/bind {bindCode}</p>
-                          <p>有效期：{Math.floor(bindCodeExpiry / 60)} 分钟</p>
+                          <p className="flex items-center gap-1 text-xs">
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                            等待 Bot 端验证…（剩余 {Math.max(0, Math.floor(bindCodeExpiry / 60))} 分钟）
+                          </p>
+                        </div>
+                      ) : null}
+                      {bindCode && bindConfirmed ? (
+                        <div className="rounded-lg border border-emerald-300/60 bg-emerald-50 px-3 py-2 text-sm dark:border-emerald-700/60 dark:bg-emerald-900/30">
+                          <p className="font-semibold text-emerald-700 dark:text-emerald-300">
+                            ✅ Telegram 绑定成功
+                          </p>
+                          <p className="text-xs text-emerald-700/80 dark:text-emerald-300/80">
+                            点击下方「注册」按钮即可进入系统。
+                          </p>
                         </div>
                       ) : null}
                     </div>
@@ -589,7 +667,11 @@ export default function RegisterPage() {
                     <Button
                       type="submit"
                       className="h-11 w-full"
-                      disabled={isRegisterLoading || (registerTarget === "emby" && !!embyRegisterBlockedReason)}
+                      disabled={
+                        isRegisterLoading ||
+                        (registerTarget === "emby" && !!embyRegisterBlockedReason) ||
+                        ((forceBindTelegram || registerTarget === "emby") && !!bindCode && !bindConfirmed)
+                      }
                     >
                       {isRegisterLoading ? (
                         <Loader2 className="mr-2 h-5 w-5 animate-spin" />
